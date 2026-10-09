@@ -1,0 +1,93 @@
+@import 'tailwindcss';
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* SAMS design tokens (light) */
+:root {
+  --background: #eef2f8;
+  --surface: #ffffff;
+  --surface-muted: #f4f6fb;
+  --line: #e2e8f0;
+  --ink: #0f172a;
+  --muted: #64748b;
+  --primary: #2f5be0;
+  --primary-foreground: #ffffff;
+  --primary-soft: #eef2ff;
+  --sidebar: #2b52d6;
+  --sidebar-foreground: #ffffff;
+  --sidebar-muted: rgba(255, 255, 255, 0.72);
+  --sidebar-card: rgba(255, 255, 255, 0.14);
+  --sidebar-active: #ffffff;
+  --sidebar-active-foreground: #1e3a9e;
+  --hero: #2b52d1;
+  --success: #10b981;
+  --info: #3b82f6;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+}
+
+/* SAMS design tokens (dark) */
+.dark {
+  --background: #0b1220;
+  --surface: #111a2b;
+  --surface-muted: #172236;
+  --line: #24314a;
+  --ink: #e6ebf5;
+  --muted: #94a3b8;
+  --primary: #5b8def;
+  --primary-foreground: #0b1220;
+  --primary-soft: #1b2a4a;
+  --sidebar: #0f172a;
+  --sidebar-foreground: #e6ebf5;
+  --sidebar-muted: #94a3b8;
+  --sidebar-card: #1b2538;
+  --sidebar-active: #5b8def;
+  --sidebar-active-foreground: #0b1220;
+  --hero: #2b52d1;
+  --success: #34d399;
+  --info: #60a5fa;
+  --warning: #fbbf24;
+  --danger: #f87171;
+}
+
+@theme inline {
+  --font-sans: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-soft: var(--primary-soft);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-muted: var(--sidebar-muted);
+  --color-sidebar-card: var(--sidebar-card);
+  --color-sidebar-active: var(--sidebar-active);
+  --color-sidebar-active-foreground: var(--sidebar-active-foreground);
+  --color-hero: var(--hero);
+  --color-success: var(--success);
+  --color-info: var(--info);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+}
+
+html {
+  color-scheme: light;
+}
+html.dark {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--background);
+  color: var(--ink);
+}
+
+*:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
