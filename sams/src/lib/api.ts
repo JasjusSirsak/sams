@@ -1,6 +1,5 @@
 // Mock service layer. Later, swap these bodies for Axios calls to the Express API,
 // e.g. `return apiClient.post('/attendance', payload)`.
-
 function delay<T>(data: T, ms = 700): Promise<T> {
   return new Promise((resolve) => setTimeout(() => resolve(data), ms))
 }
@@ -19,4 +18,23 @@ export function reviewRequest(id: string, decision: 'approved' | 'rejected') {
 
 export function generateReport(className: string) {
   return delay({ file: `${className.replace(/\s+/g, '-')}-Semester-1.pdf` }, 1200)
+}
+
+//get students fungsion
+import apiClient from './apiClient'
+
+export type Student = {
+  student_id: string
+  nis: string | null
+  name: string | null
+  enrollments: {
+    class_name: string
+    academic_year: string
+    semester: number
+  }[]
+}
+
+export async function getStudents(): Promise<Student[]> {
+  const response = await apiClient.get<{ data: Student[] }>('/students')
+  return response.data.data
 }

@@ -1,25 +1,3 @@
-// use prisma-next
-
-model User {
-  id        Int      @id @default(autoincrement())
-  email     String   @unique
-  username  String?
-  name      String?
-  posts     Post[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model Post {
-  id        Int      @id @default(autoincrement())
-  title     String
-  content   String?
-  author    User     @relation(fields: [authorId], references: [id])
-  authorId  Int
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -27,4 +5,277 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model academic_periods {
+  academic_period_id   BigInt                 @id @default(autoincrement())
+  academic_year        String                 @db.VarChar(20)
+  semester             Int                    @db.SmallInt
+  start_date           DateTime               @db.Date
+  end_date             DateTime               @db.Date
+  homeroom_assignments homeroom_assignments[]
+  student_enrollments  student_enrollments[]
+  teaching_assignments teaching_assignments[]
+
+  @@unique([academic_year, semester], map: "uq_academic_period")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model agendas {
+  agenda_id           BigInt                @id @default(autoincrement())
+  title               String                @db.VarChar(200)
+  description         String?
+  agenda_date         DateTime              @db.Date
+  agenda_type         String                @db.VarChar(50)
+  class_id            BigInt?
+  created_by          BigInt
+  created_at          DateTime              @default(now()) @db.Timestamptz(6)
+  classes             classes?              @relation(fields: [class_id], references: [class_id], onUpdate: NoAction, map: "fk_agenda_class")
+  users               users                 @relation(fields: [created_by], references: [user_id], onUpdate: NoAction, map: "fk_agenda_created_by")
+  attendance_sessions attendance_sessions[]
+
+  @@index([class_id], map: "idx_agendas_class")
+  @@index([agenda_date], map: "idx_agendas_date")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model attendance_records {
+  attendance_record_id  BigInt              @id @default(autoincrement())
+  attendance_session_id BigInt
+  student_id            BigInt
+  status                String              @db.VarChar(20)
+  note                  String?
+  document_url          String?
+  approval_status       String              @default("NOT_REQUIRED") @db.VarChar(20)
+  approved_by           BigInt?
+  approved_at           DateTime?           @db.Timestamptz(6)
+  created_at            DateTime            @default(now()) @db.Timestamptz(6)
+  users                 users?              @relation(fields: [approved_by], references: [user_id], onUpdate: NoAction, map: "fk_attendance_record_approved_by")
+  attendance_sessions   attendance_sessions @relation(fields: [attendance_session_id], references: [attendance_session_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_attendance_record_session")
+  students              students            @relation(fields: [student_id], references: [student_id], onUpdate: NoAction, map: "fk_attendance_record_student")
+
+  @@unique([attendance_session_id, student_id], map: "uq_attendance_student")
+  @@index([attendance_session_id], map: "idx_attendance_records_session")
+  @@index([student_id], map: "idx_attendance_records_student")
+}
+
+model attendance_sessions {
+  attendance_session_id BigInt               @id @default(autoincrement())
+  class_id              BigInt
+  agenda_id             BigInt?
+  attendance_date       DateTime             @db.Date
+  created_by            BigInt
+  created_at            DateTime             @default(now()) @db.Timestamptz(6)
+  attendance_records    attendance_records[]
+  agendas               agendas?             @relation(fields: [agenda_id], references: [agenda_id], onUpdate: NoAction, map: "fk_attendance_session_agenda")
+  classes               classes              @relation(fields: [class_id], references: [class_id], onUpdate: NoAction, map: "fk_attendance_session_class")
+  users                 users                @relation(fields: [created_by], references: [user_id], onUpdate: NoAction, map: "fk_attendance_session_created_by")
+
+  @@unique([class_id, attendance_date], map: "uq_attendance_session")
+  @@index([class_id], map: "idx_attendance_sessions_class")
+  @@index([attendance_date], map: "idx_attendance_sessions_date")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model classes {
+  class_id             BigInt                 @id @default(autoincrement())
+  name                 String                 @unique(map: "uq_class_name") @db.VarChar(100)
+  grade_level          Int                    @db.SmallInt
+  agendas              agendas[]
+  attendance_sessions  attendance_sessions[]
+  homeroom_assignments homeroom_assignments[]
+  student_enrollments  student_enrollments[]
+  teaching_assignments teaching_assignments[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model grades {
+  grade_id               BigInt               @id @default(autoincrement())
+  student_id             BigInt
+  teaching_assignment_id BigInt
+  assessment_type        String               @db.VarChar(50)
+  assessment_name        String               @db.VarChar(100)
+  score                  Decimal              @db.Decimal(5, 2)
+  created_at             DateTime             @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime             @default(now()) @db.Timestamptz(6)
+  students               students             @relation(fields: [student_id], references: [student_id], onUpdate: NoAction, map: "fk_grade_student")
+  teaching_assignments   teaching_assignments @relation(fields: [teaching_assignment_id], references: [teaching_assignment_id], onUpdate: NoAction, map: "fk_grade_teaching_assignment")
+
+  @@unique([student_id, teaching_assignment_id, assessment_name], map: "uq_grade_assessment")
+  @@index([student_id], map: "idx_grades_student")
+  @@index([teaching_assignment_id], map: "idx_grades_teaching_assignment")
+}
+
+model homeroom_assignments {
+  homeroom_assignment_id BigInt           @id @default(autoincrement())
+  teacher_id             BigInt
+  class_id               BigInt
+  academic_period_id     BigInt
+  classes                classes          @relation(fields: [class_id], references: [class_id], onUpdate: NoAction, map: "fk_homeroom_class")
+  academic_periods       academic_periods @relation(fields: [academic_period_id], references: [academic_period_id], onUpdate: NoAction, map: "fk_homeroom_period")
+  teachers               teachers         @relation(fields: [teacher_id], references: [teacher_id], onUpdate: NoAction, map: "fk_homeroom_teacher")
+
+  @@unique([class_id, academic_period_id], map: "uq_homeroom_class_period")
+  @@unique([teacher_id, academic_period_id], map: "uq_homeroom_teacher_period")
+  @@index([class_id], map: "idx_homeroom_assignments_class")
+  @@index([teacher_id], map: "idx_homeroom_assignments_teacher")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model journals {
+  journal_id                BigInt               @id @default(autoincrement())
+  teaching_assignment_id    BigInt
+  journal_date              DateTime             @db.Date
+  start_time                DateTime?            @db.Time(6)
+  end_time                  DateTime?            @db.Time(6)
+  topic                     String               @db.VarChar(200)
+  description               String?
+  teacher_attendance_status String?              @db.VarChar(20)
+  created_at                DateTime             @default(now()) @db.Timestamptz(6)
+  teaching_assignments      teaching_assignments @relation(fields: [teaching_assignment_id], references: [teaching_assignment_id], onUpdate: NoAction, map: "fk_journal_teaching_assignment")
+
+  @@index([journal_date], map: "idx_journals_date")
+  @@index([teaching_assignment_id], map: "idx_journals_teaching_assignment")
+}
+
+model parent_students {
+  parent_id         BigInt
+  student_id        BigInt
+  relationship_type String?  @db.VarChar(50)
+  parents           parents  @relation(fields: [parent_id], references: [parent_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_parent_students_parent")
+  students          students @relation(fields: [student_id], references: [student_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_parent_students_student")
+
+  @@id([parent_id, student_id])
+  @@index([student_id], map: "idx_parent_students_student_id")
+}
+
+model parents {
+  parent_id       BigInt            @id @default(autoincrement())
+  user_id         BigInt            @unique
+  name            String            @db.VarChar(150)
+  phone_number    String?           @db.VarChar(30)
+  address         String?
+  parent_students parent_students[]
+  users           users             @relation(fields: [user_id], references: [user_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_parents_user")
+}
+
+model permissions {
+  permission_id    BigInt             @id @default(autoincrement())
+  code             String             @unique @db.VarChar(100)
+  name             String             @db.VarChar(100)
+  description      String?
+  role_permissions role_permissions[]
+}
+
+model role_permissions {
+  role_id       BigInt
+  permission_id BigInt
+  permissions   permissions @relation(fields: [permission_id], references: [permission_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_role_permissions_permission")
+  roles         roles       @relation(fields: [role_id], references: [role_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_role_permissions_role")
+
+  @@id([role_id, permission_id])
+  @@index([permission_id], map: "idx_role_permissions_permission_id")
+}
+
+model roles {
+  role_id          BigInt             @id @default(autoincrement())
+  name             String             @unique @db.VarChar(50)
+  description      String?
+  role_permissions role_permissions[]
+  users            users[]
+}
+
+model staff {
+  staff_id        BigInt  @id @default(autoincrement())
+  user_id         BigInt  @unique
+  employee_number String? @unique @db.VarChar(50)
+  name            String  @db.VarChar(150)
+  users           users   @relation(fields: [user_id], references: [user_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_staff_user")
+}
+
+model student_enrollments {
+  enrollment_id      BigInt           @id @default(autoincrement())
+  student_id         BigInt
+  class_id           BigInt
+  academic_period_id BigInt
+  classes            classes          @relation(fields: [class_id], references: [class_id], onUpdate: NoAction, map: "fk_enrollment_class")
+  academic_periods   academic_periods @relation(fields: [academic_period_id], references: [academic_period_id], onUpdate: NoAction, map: "fk_enrollment_period")
+  students           students         @relation(fields: [student_id], references: [student_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_enrollment_student")
+
+  @@unique([student_id, academic_period_id], map: "uq_student_enrollment")
+  @@index([class_id, academic_period_id], map: "idx_student_enrollments_class_period")
+  @@index([student_id], map: "idx_student_enrollments_student")
+}
+
+model students {
+  student_id          BigInt                @id @default(autoincrement())
+  user_id             BigInt?               @unique
+  nis                 String                @unique @db.VarChar(50)
+  name                String                @db.VarChar(150)
+  birth_date          DateTime?             @db.Date
+  phone_number        String?               @db.VarChar(30)
+  address             String?
+  attendance_records  attendance_records[]
+  grades              grades[]
+  parent_students     parent_students[]
+  student_enrollments student_enrollments[]
+  users               users?                @relation(fields: [user_id], references: [user_id], onUpdate: NoAction, map: "fk_students_user")
+}
+
+model subjects {
+  subject_id           BigInt                 @id @default(autoincrement())
+  code                 String                 @unique @db.VarChar(30)
+  name                 String                 @db.VarChar(100)
+  teaching_assignments teaching_assignments[]
+}
+
+model teachers {
+  teacher_id           BigInt                 @id @default(autoincrement())
+  user_id              BigInt                 @unique
+  employee_number      String?                @unique @db.VarChar(50)
+  name                 String                 @db.VarChar(150)
+  homeroom_assignments homeroom_assignments[]
+  users                users                  @relation(fields: [user_id], references: [user_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_teachers_user")
+  teaching_assignments teaching_assignments[]
+}
+
+model teaching_assignments {
+  teaching_assignment_id BigInt           @id @default(autoincrement())
+  teacher_id             BigInt
+  class_id               BigInt
+  subject_id             BigInt
+  academic_period_id     BigInt
+  grades                 grades[]
+  journals               journals[]
+  classes                classes          @relation(fields: [class_id], references: [class_id], onUpdate: NoAction, map: "fk_teaching_assignment_class")
+  academic_periods       academic_periods @relation(fields: [academic_period_id], references: [academic_period_id], onUpdate: NoAction, map: "fk_teaching_assignment_period")
+  subjects               subjects         @relation(fields: [subject_id], references: [subject_id], onUpdate: NoAction, map: "fk_teaching_assignment_subject")
+  teachers               teachers         @relation(fields: [teacher_id], references: [teacher_id], onUpdate: NoAction, map: "fk_teaching_assignment_teacher")
+
+  @@unique([teacher_id, class_id, subject_id, academic_period_id], map: "uq_teaching_assignment")
+  @@index([class_id], map: "idx_teaching_assignments_class")
+  @@index([academic_period_id], map: "idx_teaching_assignments_period")
+  @@index([subject_id], map: "idx_teaching_assignments_subject")
+  @@index([teacher_id], map: "idx_teaching_assignments_teacher")
+}
+
+model users {
+  user_id             BigInt                @id @default(autoincrement())
+  username            String                @unique @db.VarChar(100)
+  password_hash       String
+  role_id             BigInt
+  is_active           Boolean               @default(true)
+  created_at          DateTime              @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime              @default(now()) @db.Timestamptz(6)
+  agendas             agendas[]
+  attendance_records  attendance_records[]
+  attendance_sessions attendance_sessions[]
+  parents             parents?
+  staff               staff?
+  students            students?
+  teachers            teachers?
+  roles               roles                 @relation(fields: [role_id], references: [role_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_users_role")
+
+  @@index([role_id], map: "idx_users_role_id")
 }
