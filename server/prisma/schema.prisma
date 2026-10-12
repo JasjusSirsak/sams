@@ -6,8 +6,8 @@ model User {
   username  String?
   name      String?
   posts     Post[]
-  createdAt TimestamptzString @default(now())
-  updatedAt temporal.updatedAtString()
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Post {
@@ -16,6 +16,15 @@ model Post {
   content   String?
   author    User     @relation(fields: [authorId], references: [id])
   authorId  Int
-  createdAt TimestamptzString @default(now())
-  updatedAt temporal.updatedAtString()
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
