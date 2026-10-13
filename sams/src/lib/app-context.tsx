@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { INITIAL_PENDING, type Approval, type AttendanceStatus, type PendingRequest, type Role } from './data'
+import { clearSession, getStoredUser, type AuthUser } from './auth' // ── AUTH (baru)
 
 export type TodayRecord = {
   status: AttendanceStatus
@@ -28,6 +29,11 @@ type AppState = {
   pending: PendingRequest[]
   reviewed: ReviewedRequest[]
   decide: (id: string, decision: 'approved' | 'rejected') => void
+  // ── AUTH (baru) ──
+  user: AuthUser | null
+  isAuthed: boolean
+  signIn: (user: AuthUser) => void
+  signOut: () => void
 }
 
 const AppContext = createContext<AppState | null>(null)
@@ -42,16 +48,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [today, setToday] = useState<TodayRecord | null>(null)
   const [pending, setPending] = useState<PendingRequest[]>(INITIAL_PENDING)
   const [reviewed, setReviewed] = useState<ReviewedRequest[]>([])
+  // ── AUTH (baru) ──
+  const [user, setUser] = useState<AuthUser | null>(null)
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', dark)
   }, [dark])
 
+  // ── AUTH (baru): pulihkan sesi tersimpan saat aplikasi dimuat ulang ──
+  useEffect(() => {
+    const stored = getStoredUser()
+    if (stored) {
+      setUser(stored)
+      setRole(stored.role)
+    }
+  }, [])
+
   function submitToday(record: Omit<TodayRecord, 'approval'>) {
     const needsApproval = record.status === 'izin' || record.status === 'sakit'
     setToday({ ...record, approval: needsApproval ? 'pending' : 'approved' })
     if (needsApproval) {
-      // The student's own request shows up in the homeroom teacher's queue.
       setPending((list) => [
         {
           id: SELF_ID,
@@ -83,6 +99,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  // ── AUTH ──
+  function signIn(u: AuthUser) {
+    setUser(u)
+    setRole(u.role) // Global role included in user login → canAccess() immediately returns true.
+  } 
+
+  function signOut() {
+    clearSession()
+    setUser(null)
+    setRole('student') // back to default
+  }
+
   return (
     <AppContext.Provider
       value={{
@@ -100,6 +128,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         pending,
         reviewed,
         decide,
+        // ── AUTH  ──
+        user,
+        isAuthed: user !== null,
+        signIn,
+        signOut,
       }}
     >
       {children}

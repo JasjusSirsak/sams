@@ -1,11 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { useApp } from '@/lib/app-context'
-import { STUDENTS } from '@/lib/data'
+import { getStudents, type Student } from '@/lib/api'
 import { cn } from '@/lib/helpers'
-import { Avatar, Card, EmptyState, Pill, inputClass } from '@/components/ui-kit'
+import { Avatar, Card, EmptyState, Pill, Spinner, buttonSecondary, inputClass } from '@/components/ui-kit'
 
 const PAGE_SIZE = 6
 
@@ -15,17 +15,75 @@ function rateColor(rate: number) {
   return 'bg-warning/15 text-warning'
 }
 
+type StudentItem = Student & {
+  gender?: string | null
+  attendance?: number | null
+}
+
 export function StudentTable({ showRateOnly = false }: { showRateOnly?: boolean }) {
   const { query, setQuery } = useApp()
+  const [students, setStudents] = useState<StudentItem[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [gender, setGender] = useState('all')
   const [page, setPage] = useState(0)
 
-  const filtered = STUDENTS.filter(
-    (s) => (gender === 'all' || s.gender === gender) && (s.name.toLowerCase().includes(query.toLowerCase()) || s.nis.includes(query)),
-  )
+  const handleRetry = () => {
+    setIsLoading(true)
+    setError(null)
+    getStudents()
+      .then((data) => {
+        setStudents(Array.isArray(data) ? (data as StudentItem[]) : [])
+        setIsLoading(false)
+      })
+      .catch((err) => {
+        setError(err?.message || 'Failed to fetch student data')
+        setIsLoading(false)
+      })
+  }
+
+  useEffect(() => {
+    let isMounted = true
+
+    getStudents()
+      .then((data) => {
+        if (isMounted) {
+          setStudents(Array.isArray(data) ? (data as StudentItem[]) : [])
+          setIsLoading(false)
+        }
+      })
+      .catch((err) => {
+        if (isMounted) {
+          setError(err?.message || 'Failed to fetch student data')
+          setIsLoading(false)
+        }
+      })
+
+    return () => {
+      isMounted = false
+    }
+  }, [])
+
+  const q = query.trim().toLowerCase()
+  const filtered = students.filter((s) => {
+    const nameMatch = !q || (s.name ? s.name.toLowerCase().includes(q) : false)
+    const nisMatch = !q || (s.nis ? s.nis.includes(query) : false)
+    const searchMatch = nameMatch || nisMatch
+
+    // Safely check gender filter without misrepresenting missing data
+    const genderMatch = gender === 'all' || (Boolean(s.gender) && s.gender === gender)
+
+    return searchMatch && genderMatch
+  })
+
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
   const current = Math.min(page, pages - 1)
   const rows = filtered.slice(current * PAGE_SIZE, current * PAGE_SIZE + PAGE_SIZE)
+
+  const emptyText =
+    gender !== 'all' && students.length > 0 && students.every((s) => !s.gender)
+      ? 'Gender data is not available in the database yet.'
+      : 'Try a different name, NIS, or filter.'
 
   return (
     <Card>
@@ -65,8 +123,23 @@ export function StudentTable({ showRateOnly = false }: { showRateOnly?: boolean 
         )}
       </div>
 
-      {rows.length === 0 ? (
-        <EmptyState title="No students found" text="Try a different name, NIS, or filter." />
+      {isLoading ? (
+        <div className="flex flex-col items-center justify-center py-12 text-muted">
+          <Spinner />
+          <p className="mt-2 text-sm">Loading students...</p>
+        </div>
+      ) : error ? (
+        <EmptyState
+          title="Failed to load students"
+          text={error}
+          action={
+            <button type="button" onClick={handleRetry} className={buttonSecondary}>
+              Try again
+            </button>
+          }
+        />
+      ) : rows.length === 0 ? (
+        <EmptyState title="No students found" text={emptyText} />
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[520px] text-sm">
@@ -80,22 +153,42 @@ export function StudentTable({ showRateOnly = false }: { showRateOnly?: boolean 
               </tr>
             </thead>
             <tbody className="divide-y divide-line">
-              {rows.map((s) => (
-                <tr key={s.nis}>
-                  <td className="py-3">
-                    <span className="flex items-center gap-3">
-                      <Avatar initials={s.name.split(' ').map((p) => p[0]).join('')} className="size-8 text-xs" />
-                      <span className="font-medium text-ink">{s.name}</span>
-                    </span>
-                  </td>
-                  <td className="py-3 text-muted">{s.nis}</td>
-                  {!showRateOnly && <td className="py-3 text-ink">{s.cls}</td>}
-                  {!showRateOnly && <td className="py-3 text-ink">{s.gender}</td>}
-                  <td className="py-3 text-right">
-                    <Pill className={rateColor(s.attendance)}>{s.attendance}%</Pill>
-                  </td>
-                </tr>
-              ))}
+              {rows.map((s) => {
+                const name = s.name?.trim() || 'Unnamed'
+                const initials = s.name?.trim()
+                  ? s.name
+                      .trim()
+                      .split(/\s+/)
+                      .map((p) => p[0])
+                      .join('')
+                      .slice(0, 2)
+                      .toUpperCase()
+                  : '—'
+                const nis = s.nis || '—'
+                const className = s.enrollments?.[0]?.class_name || '—'
+                const studentGender = s.gender || '—'
+
+                return (
+                  <tr key={s.student_id || s.nis || name}>
+                    <td className="py-3">
+                      <span className="flex items-center gap-3">
+                        <Avatar initials={initials} className="size-8 text-xs" />
+                        <span className="font-medium text-ink">{name}</span>
+                      </span>
+                    </td>
+                    <td className="py-3 text-muted">{nis}</td>
+                    {!showRateOnly && <td className="py-3 text-ink">{className}</td>}
+                    {!showRateOnly && <td className="py-3 text-ink">{studentGender}</td>}
+                    <td className="py-3 text-right">
+                      {s.attendance != null ? (
+                        <Pill className={rateColor(s.attendance)}>{s.attendance}%</Pill>
+                      ) : (
+                        <span className="font-medium text-muted">—</span>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
@@ -109,7 +202,7 @@ export function StudentTable({ showRateOnly = false }: { showRateOnly?: boolean 
           <button
             type="button"
             onClick={() => setPage(current - 1)}
-            disabled={current === 0}
+            disabled={current === 0 || isLoading}
             aria-label="Previous page"
             className="rounded-lg border border-line p-1.5 text-ink disabled:opacity-40"
           >
@@ -121,7 +214,7 @@ export function StudentTable({ showRateOnly = false }: { showRateOnly?: boolean 
           <button
             type="button"
             onClick={() => setPage(current + 1)}
-            disabled={current >= pages - 1}
+            disabled={current >= pages - 1 || isLoading}
             aria-label="Next page"
             className="rounded-lg border border-line p-1.5 text-ink disabled:opacity-40"
           >
