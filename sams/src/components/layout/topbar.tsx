@@ -5,19 +5,32 @@ import { useRouter } from '@/lib/nav'
 import { Bell, Check, Menu, Moon, Search, Sun, UserRoundCog } from 'lucide-react'
 import { useApp } from '@/lib/app-context'
 import { NOTIFICATIONS, USERS, type Role } from '@/lib/data'
-import { canAccess, cn } from '@/lib/helpers'
+import { canAccess, cn, getInitials } from '@/lib/helpers'
 import { Avatar } from '@/components/ui-kit'
 
 const ROLES: Role[] = ['student', 'parent', 'teacher', 'homeroom']
 
 export function Topbar({ onMenu }: { onMenu: () => void }) {
-  const { role, setRole, dark, toggleDark, query, setQuery } = useApp()
+  const { role, setRole, dark, toggleDark, query, setQuery, user: authUser, isAuthenticated, signIn } = useApp()
   const router = useRouter()
-  const [open, setOpen] = useState<'role' | 'bell' | null>(null)
-  const user = USERS[role]
+  
+  // 1. Updated open state to support 'profile'
+  const [open, setOpen] = useState<'role' | 'bell' | 'profile' | null>(null)
+  
+  const mockUser = USERS[role]
+
+  const displayName = authUser?.name || mockUser.name
+  const displayInitials = authUser ? getInitials(authUser.name) : mockUser.initials
+  const displaySubtitle = authUser
+    ? (authUser.className ? `${mockUser.roleLabel} · ${authUser.className}` : mockUser.subtitle)
+    : mockUser.subtitle
 
   function changeRole(r: Role) {
-    setRole(r)
+    if (isAuthenticated && authUser) {
+      signIn({ ...authUser, role: r })
+    } else {
+      setRole(r)
+    }
     setOpen(null)
     router.push('/')
   }
@@ -27,8 +40,23 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
     router.push(canAccess(role, '/students') ? '/students' : '/agenda')
   }
 
+  // 2. Logout handler
+  function handleLogout() {
+    // 1. Remove all auth data from localStorage / sessionStorage
+    localStorage.removeItem('sams_token')
+    localStorage.removeItem('sams_user') // adjust if there are other user keys
+    sessionStorage.clear()
+
+    // 2. If using state management from app-context (e.g. signOut / reset function), call it here:
+    // signOut() // Enable this line if signOut is available from useApp()
+
+    // 3. Force navigation to login page using custom router
+    router.push('/login')
+  }
+
   return (
     <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-line bg-background/80 px-4 py-3 backdrop-blur md:px-8">
+      {/* ... menu button & search bar remain the same ... */}
       <button
         type="button"
         onClick={onMenu}
@@ -53,6 +81,7 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
       </form>
 
       <div className="ml-auto flex items-center gap-1 sm:gap-2">
+        {/* Switch Role & Notifications buttons */}
         <div className="relative">
           <button
             type="button"
@@ -62,7 +91,7 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
             className="flex items-center gap-2 rounded-xl border border-line bg-surface px-3 py-2 text-sm font-medium text-ink shadow-sm hover:bg-surface-muted"
           >
             <UserRoundCog className="size-4" aria-hidden="true" />
-            <span className="hidden sm:inline">{user.roleLabel}</span>
+            <span className="hidden sm:inline">{mockUser.roleLabel}</span>
             <span className="sr-only sm:hidden">Switch role</span>
           </button>
           {open === 'role' && (
@@ -125,13 +154,44 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
           )}
         </div>
 
-        <div className="ml-1 flex items-center gap-3">
-          <Avatar initials={user.initials} />
-          <div className="hidden leading-tight md:block">
-            <p className="text-sm font-semibold text-ink">{user.name}</p>
-            <p className="text-xs text-muted">{user.subtitle}</p>
-          </div>
+        {/* 3. Profile dropdown in the top-right corner */}
+        <div className="relative ml-1 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setOpen(open === 'profile' ? null : 'profile')}
+            aria-haspopup="menu"
+            aria-expanded={open === 'profile'}
+            className="flex items-center gap-3 rounded-xl p-1.5 hover:bg-surface transition text-left focus:outline-none"
+          >
+            <Avatar initials={displayInitials} />
+            <div className="hidden leading-tight md:block">
+              <p className="text-sm font-semibold text-ink">{displayName}</p>
+              <p className="text-xs text-muted">{displaySubtitle}</p>
+            </div>
+          </button>
+
+          {open === 'profile' && (
+            <Dropdown onClose={() => setOpen(null)}>
+              <div className="px-3 pb-2 pt-2 border-b border-line mb-1">
+                <p className="text-xs font-medium text-muted">Signed in as</p>
+                <p className="text-sm font-semibold text-ink truncate">{displayName}</p>
+              </div>
+              <ul role="menu">
+                <li>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={handleLogout}
+                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium text-danger hover:bg-surface-muted transition"
+                  >
+                    <span>🚪</span> Log out
+                  </button>
+                </li>
+              </ul>
+            </Dropdown>
+          )}
         </div>
+
       </div>
     </header>
   )

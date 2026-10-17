@@ -2,7 +2,15 @@
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { INITIAL_PENDING, type Approval, type AttendanceStatus, type PendingRequest, type Role } from './data'
-import { clearSession, getStoredUser, type AuthUser } from './auth' // ── AUTH (baru)
+import {
+  checkSession,
+  getStoredUser,
+  login as apiLogin,
+  logout as apiLogout,
+  saveSession,
+  type LoginCredentials,
+  type User,
+} from './auth'
 
 export type TodayRecord = {
   status: AttendanceStatus
@@ -29,10 +37,17 @@ type AppState = {
   pending: PendingRequest[]
   reviewed: ReviewedRequest[]
   decide: (id: string, decision: 'approved' | 'rejected') => void
-  // ── AUTH (baru) ──
-  user: AuthUser | null
+  // ── Auth State ──
+  user: User | null
+  isAuthenticated: boolean
+  isLoading: boolean
+  // Legacy alias for compatibility
   isAuthed: boolean
-  signIn: (user: AuthUser) => void
+  login: (credentials: LoginCredentials) => Promise<User>
+  logout: () => Promise<void>
+  checkAuthStatus: () => Promise<void>
+  // Manual setter for backward compatibility
+  signIn: (user: User) => void
   signOut: () => void
 }
 
@@ -41,28 +56,106 @@ const AppContext = createContext<AppState | null>(null)
 const SELF_ID = 'self'
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [role, setRole] = useState<Role>('student')
+  // Get initial stored user synchronously if present in localStorage (reduces flicker)
+  const initialUser = typeof window !== 'undefined' ? getStoredUser() : null
+
+  const [user, setUser] = useState<User | null>(initialUser)
+  const [role, setRole] = useState<Role>(initialUser?.role ?? 'student')
+  const [isLoading, setIsLoading] = useState<boolean>(true)
+
   const [dark, setDark] = useState(false)
   const [childId, setChildId] = useState('raka')
   const [query, setQuery] = useState('')
   const [today, setToday] = useState<TodayRecord | null>(null)
   const [pending, setPending] = useState<PendingRequest[]>(INITIAL_PENDING)
   const [reviewed, setReviewed] = useState<ReviewedRequest[]>([])
-  // ── AUTH (baru) ──
-  const [user, setUser] = useState<AuthUser | null>(null)
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', dark)
   }, [dark])
 
-  // ── AUTH (baru): pulihkan sesi tersimpan saat aplikasi dimuat ulang ──
+  // Verify session on mount
   useEffect(() => {
-    const stored = getStoredUser()
-    if (stored) {
-      setUser(stored)
-      setRole(stored.role)
+    let isMounted = true
+
+    async function initAuth() {
+      try {
+        const verifiedUser = await checkSession()
+        if (isMounted) {
+          if (verifiedUser) {
+            setUser(verifiedUser)
+            setRole(verifiedUser.role)
+          } else {
+            setUser(null)
+          }
+        }
+      } catch {
+        if (isMounted) {
+          // fallback to local stored user
+          const stored = getStoredUser()
+          setUser(stored)
+          if (stored) setRole(stored.role)
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoading(false)
+        }
+      }
+    }
+
+    initAuth()
+
+    return () => {
+      isMounted = false
     }
   }, [])
+
+  async function checkAuthStatus() {
+    setIsLoading(true)
+    try {
+      const verifiedUser = await checkSession()
+      setUser(verifiedUser)
+      if (verifiedUser) {
+        setRole(verifiedUser.role)
+      }
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  async function login(credentials: LoginCredentials): Promise<User> {
+    setIsLoading(true)
+    try {
+      const result = await apiLogin(credentials)
+      saveSession(result.token, result.user)
+      setUser(result.user)
+      setRole(result.user.role)
+      return result.user
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  async function logout() {
+    setIsLoading(true)
+    try {
+      await apiLogout()
+      setUser(null)
+      setRole('student')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Backward-compatible methods
+  function signIn(u: User) {
+    setUser(u)
+    setRole(u.role)
+  }
+
+  function signOut() {
+    void logout()
+  }
 
   function submitToday(record: Omit<TodayRecord, 'approval'>) {
     const needsApproval = record.status === 'izin' || record.status === 'sakit'
@@ -99,17 +192,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  // ── AUTH ──
-  function signIn(u: AuthUser) {
-    setUser(u)
-    setRole(u.role) // Global role included in user login → canAccess() immediately returns true.
-  } 
-
-  function signOut() {
-    clearSession()
-    setUser(null)
-    setRole('student') // back to default
-  }
+  const isAuthenticated = user !== null
 
   return (
     <AppContext.Provider
@@ -128,9 +211,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         pending,
         reviewed,
         decide,
-        // ── AUTH  ──
+        // Auth State & Handlers
         user,
-        isAuthed: user !== null,
+        isAuthenticated,
+        isLoading,
+        isAuthed: isAuthenticated,
+        login,
+        logout,
+        checkAuthStatus,
         signIn,
         signOut,
       }}
@@ -140,11 +228,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
   )
 }
 
+// Export alias AuthProvider for clarity on auth domain
+export const AuthProvider = AppProvider
+
 export function useApp() {
   const ctx = useContext(AppContext)
-  if (!ctx) throw new Error('useApp must be used inside AppProvider')
+  if (!ctx) throw new Error('useApp must be used inside AppProvider / AuthProvider')
   return ctx
 }
+
+// Alias hook useAuth
+export const useAuth = useApp
 
 // The student whose data is shown: the student themself, or the parent's selected child.
 export function useActiveStudentId() {

@@ -4,7 +4,7 @@ import { Link, usePathname } from '@/lib/nav'
 import { BookOpenCheck, CalendarDays, ClipboardCheck, GraduationCap, LayoutDashboard, ListChecks, Users } from 'lucide-react'
 import { useApp } from '@/lib/app-context'
 import { USERS } from '@/lib/data'
-import { canAccess, cn } from '@/lib/helpers'
+import { canAccess, cn, getInitials } from '@/lib/helpers'
 
 const NAV = [
   { group: 'Overview', items: [{ href: '/', label: 'Dashboard', icon: LayoutDashboard }] },
@@ -21,9 +21,15 @@ const NAV = [
 ]
 
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
-  const { role, pending } = useApp()
+  const { role, pending, user: authUser } = useApp()
   const pathname = usePathname()
-  const user = USERS[role]
+  const mockUser = USERS[role]
+
+  const displayName = authUser?.name || mockUser.name
+  const displayInitials = authUser ? getInitials(authUser.name) : mockUser.initials
+  const displayRoleLabel = authUser
+    ? (authUser.className ? `${mockUser.roleLabel} (${authUser.className})` : mockUser.roleLabel)
+    : mockUser.roleLabel
 
   return (
     <div className="flex h-full flex-col bg-sidebar px-3 py-5 text-sidebar-foreground">
@@ -39,11 +45,11 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 
       <div className="mb-6 flex items-center gap-3 rounded-2xl bg-sidebar-card p-3">
         <span className="flex size-10 items-center justify-center rounded-full bg-white text-sm font-semibold text-[#2b52d6] dark:bg-primary dark:text-primary-foreground">
-          {user.initials}
+          {displayInitials}
         </span>
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold">{user.name}</p>
-          <p className="truncate text-xs text-sidebar-muted">{user.roleLabel}</p>
+          <p className="truncate text-sm font-semibold">{displayName}</p>
+          <p className="truncate text-xs text-sidebar-muted">{displayRoleLabel}</p>
         </div>
       </div>
 

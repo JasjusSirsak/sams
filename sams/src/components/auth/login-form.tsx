@@ -1,9 +1,9 @@
 'use client'
 
 import { useState, type FormEvent } from 'react'
-import { useRouter } from 'next/navigation'
-import { login, saveSession, type ApiError } from '@/lib/auth'
+import { useRouter } from '@/lib/nav'
 import { useApp } from '@/lib/app-context'
+import type { ApiErrorResponse } from '@/lib/apiClient'
 
 interface FormValues {
   identity: string
@@ -13,19 +13,19 @@ interface FormValues {
 type FieldErrors = Partial<Record<keyof FormValues, string>>
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-const MIN_PASSWORD = 8 // sesuaikan kebijakan password backend
+const MIN_PASSWORD = 8 // match backend password policy
 
 function validate(values: FormValues): FieldErrors {
   const errors: FieldErrors = {}
   const identity = values.identity.trim()
 
-  if (!identity) errors.identity = 'Email atau username wajib diisi.'
+  if (!identity) errors.identity = 'Email or username is required.'
   else if (identity.includes('@') && !EMAIL_RE.test(identity))
-    errors.identity = 'Format email tidak valid.'
+    errors.identity = 'Invalid email format.'
 
-  if (!values.password) errors.password = 'Kata sandi wajib diisi.'
+  if (!values.password) errors.password = 'Password is required.'
   else if (values.password.length < MIN_PASSWORD)
-    errors.password = `Kata sandi minimal ${MIN_PASSWORD} karakter.`
+    errors.password = `Password must be at least ${MIN_PASSWORD} characters.`
 
   return errors
 }
@@ -40,7 +40,7 @@ const inputClass = (error?: string) =>
 
 export function LoginForm() {
   const router = useRouter()
-  const { signIn } = useApp()
+  const { login } = useApp()
 
   const [values, setValues] = useState<FormValues>({ identity: '', password: '' })
   const [errors, setErrors] = useState<FieldErrors>({})
@@ -50,7 +50,7 @@ export function LoginForm() {
 
   function handleChange(field: keyof FormValues, value: string) {
     setValues((prev) => ({ ...prev, [field]: value }))
-    // error field hilang begitu user mengetik ulang
+    // clear field error as user re-types
     if (errors[field]) setErrors((prev) => ({ ...prev, [field]: undefined }))
     if (formError) setFormError('')
   }
@@ -72,16 +72,14 @@ export function LoginForm() {
 
     setSubmitting(true)
     try {
-      const { token, user } = await login({
+      // useApp().login() handles: API call → saveSession → setUser → setRole
+      await login({
         identity: values.identity.trim(),
         password: values.password,
       })
-
-      saveSession(token, user) // token auto-terpasang lewat interceptor apiClient
-      signIn(user)             // role tersinkron ke app-context
-      router.replace('/dashboard')
+      router.replace('/')
     } catch (err) {
-      setFormError((err as ApiError).message || 'Gagal masuk. Silakan coba lagi.')
+      setFormError((err as ApiErrorResponse).message || 'Login failed. Please try again.')
     } finally {
       setSubmitting(false)
     }
@@ -101,7 +99,7 @@ export function LoginForm() {
       {/* Email / username */}
       <div>
         <label htmlFor="identity" className="mb-1.5 block text-sm font-medium text-slate-700">
-          Email atau Username
+          Email or Username
         </label>
         <input
           id="identity"
@@ -114,7 +112,7 @@ export function LoginForm() {
           onBlur={() => handleBlur('identity')}
           aria-invalid={Boolean(errors.identity)}
           aria-describedby={errors.identity ? 'identity-error' : undefined}
-          placeholder="nama@sekolah.sch.id"
+          placeholder="name@school.edu"
           className={inputClass(errors.identity)}
         />
         {errors.identity && (
@@ -124,10 +122,10 @@ export function LoginForm() {
         )}
       </div>
 
-      {/* Kata sandi */}
+      {/* Password */}
       <div>
         <label htmlFor="password" className="mb-1.5 block text-sm font-medium text-slate-700">
-          Kata Sandi
+          Password
         </label>
         <div className="relative">
           <input
@@ -146,7 +144,7 @@ export function LoginForm() {
           <button
             type="button"
             onClick={() => setShowPassword((s) => !s)}
-            aria-label={showPassword ? 'Sembunyikan kata sandi' : 'Tampilkan kata sandi'}
+            aria-label={showPassword ? 'Hide password' : 'Show password'}
             className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 transition hover:text-slate-600"
           >
             {showPassword ? <EyeOff /> : <Eye />}
@@ -171,10 +169,10 @@ export function LoginForm() {
               aria-hidden
               className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"
             />
-            Memproses…
+            Processing…
           </>
         ) : (
-          'Masuk'
+          'Sign in'
         )}
       </button>
     </form>

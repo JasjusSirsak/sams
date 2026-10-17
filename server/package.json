@@ -1,7 +1,10 @@
 {
   "devDependencies": {
     "@prisma/cli-engine": "^0.2.3",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/cookie-parser": "^1.4.10",
     "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^26.6.4",
     "prisma": "^6.19.3",
     "tsx": "^4.23.15",
@@ -10,13 +13,19 @@
   "dependencies": {
     "@prisma/client": "^6.19.3",
     "@prisma/orm-postgres": "^8.0.0-rc.17",
+    "argon2": "^0.45.1",
+    "bcryptjs": "^3.0.3",
+    "cookie-parser": "^1.4.7",
     "dotenv": "^18.0.6",
-    "express": "^5.3.0"
+    "express": "^5.3.0",
+    "express-rate-limit": "^8.7.1",
+    "helmet": "^8.3.0",
+    "jsonwebtoken": "^9.0.3"
   },
-"scripts": {
-  "postinstall": "prisma skills sync || exit 0",
-  "contract:emit": "prisma contract emit",
-  "dev": "tsx watch src/index.ts"
-},
+  "scripts": {
+    "postinstall": "prisma skills sync || exit 0",
+    "contract:emit": "prisma contract emit",
+    "dev": "tsx watch src/index.ts"
+  },
   "type": "module"
 }

@@ -3,3 +3,4 @@ node_modules
 .env
 schema.example.backup.prisma
 /src/generated/prisma
+src/hash.ts

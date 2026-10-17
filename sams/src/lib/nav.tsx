@@ -3,6 +3,7 @@ import { createContext, useContext, useEffect, useState, type MouseEvent, type R
 type NavState = {
   pathname: string
   push: (to: string) => void
+  replace: (to: string) => void
 }
 
 const NavContext = createContext<NavState | null>(null)
@@ -21,7 +22,12 @@ export function NavProvider({ children }: { children: ReactNode }) {
     setPathname(to)
   }
 
-  return <NavContext.Provider value={{ pathname, push }}>{children}</NavContext.Provider>
+  function replace(to: string) {
+    window.history.replaceState({}, '', to)
+    setPathname(to)
+  }
+
+  return <NavContext.Provider value={{ pathname, push, replace }}>{children}</NavContext.Provider>
 }
 
 function useNav() {
@@ -35,8 +41,8 @@ export function usePathname() {
 }
 
 export function useRouter() {
-  const { push } = useNav()
-  return { push }
+  const { push, replace } = useNav()
+  return { push, replace }
 }
 
 type LinkProps = {

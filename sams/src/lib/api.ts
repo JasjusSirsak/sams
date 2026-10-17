@@ -20,7 +20,7 @@ export function generateReport(className: string) {
   return delay({ file: `${className.replace(/\s+/g, '-')}-Semester-1.pdf` }, 1200)
 }
 
-//get students fungsion
+// Get students function
 import apiClient from './apiClient'
 
 export type Student = {
@@ -36,5 +36,77 @@ export type Student = {
 
 export async function getStudents(): Promise<Student[]> {
   const response = await apiClient.get<{ data: Student[] }>('/students')
+  return response.data.data
+}
+
+export type TeacherDashboardSummary = {
+  teacher_id: string
+  name: string
+  classes_taught: number
+  total_students: number
+  attendance_today: {
+    rate: number
+    present: number
+    total: number
+    hint: string
+  }
+  subjects: string[]
+  active_period: {
+    academic_year: string
+    semester: number
+  } | null
+}
+
+export async function getTeacherDashboardSummary(): Promise<TeacherDashboardSummary> {
+  const response = await apiClient.get<{ data: TeacherDashboardSummary }>('/teacher/dashboard-summary')
+  return response.data.data
+}
+
+export type TeacherClassItem = {
+  id: string
+  assignment_id: string
+  name: string
+  subject: string
+  students: number
+  progress: number
+  academic_year: string
+  semester: number
+}
+
+export async function getTeacherClasses(): Promise<TeacherClassItem[]> {
+  const response = await apiClient.get<{ data: TeacherClassItem[] }>('/teacher/classes')
+  return response.data.data
+}
+
+export type TeacherWeeklyAttendanceDay = {
+  day: string
+  hadir: number
+  izin: number
+  sakit: number
+  alfa: number
+}
+
+export type TeacherWeeklyAttendance = {
+  class_name: string
+  weekly: TeacherWeeklyAttendanceDay[]
+}
+
+export async function getTeacherWeeklyAttendance(): Promise<TeacherWeeklyAttendance> {
+  const response = await apiClient.get<{ data: TeacherWeeklyAttendance }>('/teacher/attendance-weekly')
+  return response.data.data
+}
+
+export type TeacherAgendaItem = {
+  id: string
+  title: string
+  description: string
+  date: string
+  time: string
+  place: string
+  category: 'school' | 'academic' | 'assignment' | 'meeting' | 'exam'
+}
+
+export async function getTeacherAgendas(params?: { date?: string; start_date?: string; end_date?: string }): Promise<TeacherAgendaItem[]> {
+  const response = await apiClient.get<{ data: TeacherAgendaItem[] }>('/teacher/agendas', { params })
   return response.data.data
 }
