@@ -6,6 +6,11 @@ import rateLimit from 'express-rate-limit'
 import prisma from './db'
 import authRouter from './authRouter'
 import teacherRouter from './teacherRouter'
+import attendanceRouter from './attendanceRouter'
+import gradesRouter from './gradesRouter'
+import homeroomRouter from './homeroomRouter'
+import journalsRouter from './journalsRouter'
+import { UPLOADS_DIR } from './middlewares/upload'
 import { requireAuth, requireRole } from './auth'
 
 const app = express()
@@ -22,8 +27,12 @@ app.use(helmet({
 }))
 app.disable('x-powered-by')
 
-app.use(express.json({ limit: '1mb' }))
+app.use(express.json({ limit: '10mb' }))
+app.use(express.urlencoded({ extended: true, limit: '10mb' }))
 app.use(cookieParser())
+
+// Serve static uploaded files (e.g. proof of illness/permission)
+app.use('/uploads', express.static(UPLOADS_DIR))
 
 // 2. Rate Limiter for Login Endpoint (Prevents brute-force & credential stuffing)
 const authLimiter = rateLimit({
@@ -40,6 +49,18 @@ app.use('/api/auth/login', authLimiter)
 
 // Authentication module routing
 app.use('/api/auth', authRouter)
+
+// Attendance module routing
+app.use('/api/attendance', attendanceRouter)
+
+// Grades module routing
+app.use('/api/grades', gradesRouter)
+
+// Homeroom approval module routing
+app.use('/api/homeroom', homeroomRouter)
+
+// KBM Journals module routing
+app.use('/api/journals', journalsRouter)
 
 // Teacher module routing (Apply RBAC directly to Teacher Module Router)
 app.use('/api/teacher', requireAuth, requireRole('teacher', 'homeroom'), teacherRouter)

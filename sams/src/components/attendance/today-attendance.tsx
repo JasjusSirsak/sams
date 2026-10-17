@@ -83,11 +83,34 @@ export function TodayAttendance() {
     setError('')
     setSubmitting(true)
     try {
-      await submitAttendance({ status, note, evidence: file?.name ?? null })
+      // Map local status to server status (hadir -> PRESENT, sakit -> SICK, izin -> PERMITTED)
+      const serverStatus = status === 'hadir' ? 'PRESENT' : status === 'sakit' ? 'SICK' : 'PERMITTED'
+
+      const result = await submitAttendance({
+        status: serverStatus,
+        note: needsEvidence ? note.trim() : undefined,
+        file: needsEvidence ? file : null,
+      })
+
       const time = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
-      submitToday({ status, note: needsEvidence ? note : '', evidence: needsEvidence ? (file?.name ?? null) : null, time })
-    } catch {
-      setError('Something went wrong while saving. Please try again.')
+      const approvalMap: Record<string, 'not_required' | 'pending' | 'approved' | 'rejected'> = {
+        NOT_REQUIRED: 'not_required',
+        PENDING: 'pending',
+        APPROVED: 'approved',
+        REJECTED: 'rejected',
+      }
+
+      const approval = approvalMap[result?.data?.approval_status] || (needsEvidence ? 'pending' : 'not_required')
+
+      submitToday({
+        status,
+        approval,
+        note: needsEvidence ? note : '',
+        evidence: file?.name ?? (result?.data?.document_url || null),
+        time,
+      })
+    } catch (err: any) {
+      setError(err?.message || 'Something went wrong while saving. Please try again.')
     } finally {
       setSubmitting(false)
     }

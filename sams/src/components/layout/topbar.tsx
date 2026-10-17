@@ -2,22 +2,21 @@
 
 import { useState } from 'react'
 import { useRouter } from '@/lib/nav'
-import { Bell, Check, Menu, Moon, Search, Sun, UserRoundCog } from 'lucide-react'
+import { Bell, Menu, Moon, Search, Sun, UserRoundCog } from 'lucide-react'
 import { useApp } from '@/lib/app-context'
-import { NOTIFICATIONS, USERS, type Role } from '@/lib/data'
+import { NOTIFICATIONS, USERS } from '@/lib/data'
 import { canAccess, cn, getInitials } from '@/lib/helpers'
 import { Avatar } from '@/components/ui-kit'
 
-const ROLES: Role[] = ['student', 'parent', 'teacher', 'homeroom']
-
 export function Topbar({ onMenu }: { onMenu: () => void }) {
-  const { role, setRole, dark, toggleDark, query, setQuery, user: authUser, isAuthenticated, signIn } = useApp()
+  const { role, dark, toggleDark, query, setQuery, user: authUser } = useApp()
   const router = useRouter()
   
-  // 1. Updated open state to support 'profile'
-  const [open, setOpen] = useState<'role' | 'bell' | 'profile' | null>(null)
+  // Open state for bell notifications or profile menu
+  const [open, setOpen] = useState<'bell' | 'profile' | null>(null)
   
-  const mockUser = USERS[role]
+  const activeRole = authUser?.role ?? role
+  const mockUser = USERS[activeRole]
 
   const displayName = authUser?.name || mockUser.name
   const displayInitials = authUser ? getInitials(authUser.name) : mockUser.initials
@@ -25,38 +24,31 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
     ? (authUser.className ? `${mockUser.roleLabel} · ${authUser.className}` : mockUser.subtitle)
     : mockUser.subtitle
 
-  function changeRole(r: Role) {
-    if (isAuthenticated && authUser) {
-      signIn({ ...authUser, role: r })
-    } else {
-      setRole(r)
-    }
-    setOpen(null)
-    router.push('/')
-  }
-
   function submitSearch(e: React.FormEvent) {
     e.preventDefault()
-    router.push(canAccess(role, '/students') ? '/students' : '/agenda')
+    router.push(canAccess(activeRole, '/students') ? '/students' : '/agenda')
   }
 
-  // 2. Logout handler
-  function handleLogout() {
-    // 1. Remove all auth data from localStorage / sessionStorage
-    localStorage.removeItem('sams_token')
-    localStorage.removeItem('sams_user') // adjust if there are other user keys
-    sessionStorage.clear()
+//this paragraft for log out handler
+function handleLogout() {
+// 1. Clear all storage to ensure no residual tokens remain, regardless of key names
+localStorage.clear()
+sessionStorage.clear()
 
-    // 2. If using state management from app-context (e.g. signOut / reset function), call it here:
-    // signOut() // Enable this line if signOut is available from useApp()
+// 2. Remove any client-side cookies
+document.cookie.split(";").forEach((c) => {
+document.cookie = c
+.replace(/^ +/, "")
+.replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
+}); 
 
-    // 3. Force navigation to login page using custom router
-    router.push('/login')
-  }
+// 3. Force a full page reload to the login page using window.location
+window.location.href = '/login'
+
+}
 
   return (
     <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-line bg-background/80 px-4 py-3 backdrop-blur md:px-8">
-      {/* ... menu button & search bar remain the same ... */}
       <button
         type="button"
         onClick={onMenu}
@@ -81,44 +73,11 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
       </form>
 
       <div className="ml-auto flex items-center gap-1 sm:gap-2">
-        {/* Switch Role & Notifications buttons */}
-        <div className="relative">
-          <button
-            type="button"
-            onClick={() => setOpen(open === 'role' ? null : 'role')}
-            aria-haspopup="menu"
-            aria-expanded={open === 'role'}
-            className="flex items-center gap-2 rounded-xl border border-line bg-surface px-3 py-2 text-sm font-medium text-ink shadow-sm hover:bg-surface-muted"
-          >
-            <UserRoundCog className="size-4" aria-hidden="true" />
-            <span className="hidden sm:inline">{mockUser.roleLabel}</span>
-            <span className="sr-only sm:hidden">Switch role</span>
-          </button>
-          {open === 'role' && (
-            <Dropdown onClose={() => setOpen(null)}>
-              <p className="px-3 pb-1 pt-2 text-xs font-medium uppercase tracking-wider text-muted">View as</p>
-              <ul role="menu">
-                {ROLES.map((r) => (
-                  <li key={r}>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => changeRole(r)}
-                      className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-ink hover:bg-surface-muted"
-                    >
-                      <Avatar initials={USERS[r].initials} className="size-8 text-xs" />
-                      <span className="flex-1">
-                        <span className="block font-medium">{USERS[r].roleLabel}</span>
-                        <span className="block text-xs text-muted">{USERS[r].name}</span>
-                      </span>
-                      {r === role && <Check className="size-4 text-primary" aria-hidden="true" />}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </Dropdown>
-          )}
-        </div>
+        {/* Role badge */}
+        <span className="hidden items-center gap-2 rounded-xl border border-line bg-surface px-3 py-2 text-sm font-medium text-ink sm:flex">
+          <UserRoundCog className="size-4" aria-hidden="true" />
+          {mockUser.roleLabel}
+        </span>
 
         <button
           type="button"
@@ -144,7 +103,7 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
             <Dropdown onClose={() => setOpen(null)}>
               <p className="px-3 pb-1 pt-2 text-xs font-medium uppercase tracking-wider text-muted">Notifications</p>
               <ul>
-                {NOTIFICATIONS[role].map((n) => (
+                {NOTIFICATIONS[activeRole].map((n) => (
                   <li key={n} className="rounded-lg px-3 py-2 text-sm text-ink hover:bg-surface-muted">
                     {n}
                   </li>

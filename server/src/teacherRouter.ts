@@ -64,26 +64,42 @@ teacherRouter.get('/classes', requireAuth, async (req: Request, res: Response) =
     const assignments = await prisma.teaching_assignments.findMany({
       where: { teacher_id: teacher.teacher_id },
       include: {
-        classes: { select: { class_id: true, name: true, grade_level: true } },
+        classes: {
+          select: {
+            class_id: true,
+            name: true,
+            grade_level: true,
+            student_enrollments: { select: { student_id: true } },
+          },
+        },
         subjects: { select: { subject_id: true, name: true } },
         academic_periods: {
           select: { academic_period_id: true, academic_year: true, semester: true },
         },
+        grades: { select: { grade_id: true } },
       },
     })
 
     // Flatten data to match TeacherClassItem type on frontend (api.ts)
-    const data = assignments.map((a) => ({
-      id: a.teaching_assignment_id.toString(),
-      assignment_id: a.teaching_assignment_id.toString(),
-      name: a.classes.name,
-      subject: a.subjects.name, // string
-      grade_level: a.classes.grade_level,
-      students: 0, // TODO: calculate from student_enrollments
-      progress: 0, // TODO: calculate from journals/grades
-      academic_year: a.academic_periods.academic_year,
-      semester: a.academic_periods.semester,
-    }))
+    const data = assignments.map((a) => {
+      const studentCount = a.classes.student_enrollments.length
+      const gradesCount = a.grades.length
+      // Calculate progress percentage based on recorded grades
+      const calculatedProgress =
+        studentCount > 0 ? Math.min(100, Math.round((gradesCount / studentCount) * 100)) : 0
+
+      return {
+        id: a.teaching_assignment_id.toString(),
+        assignment_id: a.teaching_assignment_id.toString(),
+        name: a.classes.name,
+        subject: a.subjects.name,
+        grade_level: a.classes.grade_level,
+        students: studentCount,
+        progress: calculatedProgress,
+        academic_year: a.academic_periods.academic_year,
+        semester: a.academic_periods.semester,
+      }
+    })
 
     return res.json({ data })
   } catch (error) {

@@ -1,29 +1,50 @@
 'use client'
 
-import { useState } from 'react'
-import { CircleAlert, CircleCheck, Save } from 'lucide-react'
-import { saveGrades } from '@/lib/api'
-import { GRADE_ENTRY, TEACHER_CLASSES, type GradeRow } from '@/lib/data'
+import { useEffect, useState } from 'react'
+import { CircleAlert, CircleCheck, RefreshCw, Save } from 'lucide-react'
+import { getTeacherClasses, saveGrades, type TeacherClassItem } from '@/lib/api'
+import { GRADE_ENTRY, type GradeRow } from '@/lib/data'
 import { average, cn, finalScore } from '@/lib/helpers'
-import { Card, Pill, Spinner, buttonPrimary, inputClass } from '@/components/ui-kit'
+import { Card, Pill, Skeleton, Spinner, buttonPrimary, inputClass } from '@/components/ui-kit'
 
 type Field = 'daily' | 'midterm' | 'final'
-const FIELDS: { key: Field; label: string }[] = [
-  { key: 'daily', label: 'Daily (40%)' },
-  { key: 'midterm', label: 'Midterm (30%)' },
-  { key: 'final', label: 'Final (30%)' },
+const FIELDS: { key: Field; label: string; assessmentType: string; assessmentName: string }[] = [
+  { key: 'daily', label: 'Daily (40%)', assessmentType: 'DAILY_TASK', assessmentName: 'Daily Average' },
+  { key: 'midterm', label: 'Midterm (30%)', assessmentType: 'MID_EXAM', assessmentName: 'Midterm Exam' },
+  { key: 'final', label: 'Final (30%)', assessmentType: 'FINAL_EXAM', assessmentName: 'Final Exam' },
 ]
 
 const isInvalid = (v: number | null) => v != null && (Number.isNaN(v) || v < 0 || v > 100)
 
 export function GradeEntry() {
-  const [classId, setClassId] = useState(TEACHER_CLASSES[0].id)
+  const [classes, setClasses] = useState<TeacherClassItem[]>([])
+  const [selectedClass, setSelectedClass] = useState<TeacherClassItem | null>(null)
   const [period, setPeriod] = useState('s1')
+  const [loadingClasses, setLoadingClasses] = useState(true)
   const [data, setData] = useState<Record<string, GradeRow[]>>(GRADE_ENTRY)
   const [save, setSave] = useState<'saved' | 'dirty' | 'saving'>('saved')
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [missingOnly, setMissingOnly] = useState(false)
 
-  const rows = data[classId]
+  useEffect(() => {
+    setLoadingClasses(true)
+    getTeacherClasses()
+      .then((res) => {
+        setClasses(res)
+        if (res.length > 0) {
+          setSelectedClass(res[0])
+        }
+      })
+      .catch((err) => {
+        setErrorMessage(err?.message || 'Failed to load assigned classes.')
+      })
+      .finally(() => {
+        setLoadingClasses(false)
+      })
+  }, [])
+
+  const currentClassId = selectedClass?.assignment_id || '1'
+  const rows = data[currentClassId] || data['1'] || []
   const scores = rows.map(finalScore).filter((s): s is number => s != null)
   const missing = rows.length - scores.length
   const hasInvalid = rows.some((r) => FIELDS.some((f) => isInvalid(r[f.key])))
@@ -31,14 +52,45 @@ export function GradeEntry() {
 
   function update(nis: string, field: Field, raw: string) {
     const value = raw === '' ? null : Number(raw)
-    setData((d) => ({ ...d, [classId]: d[classId].map((r) => (r.nis === nis ? { ...r, [field]: value } : r)) }))
+    setData((d) => ({
+      ...d,
+      [currentClassId]: (d[currentClassId] || rows).map((r) =>
+        r.nis === nis ? { ...r, [field]: value } : r
+      ),
+    }))
     setSave('dirty')
+    setErrorMessage(null)
   }
 
   async function handleSave() {
     setSave('saving')
-    await saveGrades(classId, rows)
-    setSave('saved')
+    setErrorMessage(null)
+    try {
+      if (selectedClass) {
+        // Send grades to real backend
+        for (const field of FIELDS) {
+          const validGrades = rows
+            .filter((r) => r[field.key] != null)
+            .map((r, idx) => ({
+              student_id: (idx + 1).toString(),
+              score: r[field.key]!,
+            }))
+
+          if (validGrades.length > 0) {
+            await saveGrades({
+              teaching_assignment_id: selectedClass.assignment_id,
+              assessment_type: field.assessmentType,
+              assessment_name: field.assessmentName,
+              grades: validGrades,
+            })
+          }
+        }
+      }
+      setSave('saved')
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Failed to save grades. Please check permissions.')
+      setSave('dirty')
+    }
   }
 
   return (
@@ -49,20 +101,38 @@ export function GradeEntry() {
             <label htmlFor="class" className="mb-1.5 block text-sm font-medium text-ink">
               Class
             </label>
-            <select id="class" value={classId} onChange={(e) => setClassId(e.target.value)} className={inputClass}>
-              {TEACHER_CLASSES.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+            {loadingClasses ? (
+              <Skeleton className="h-10 w-full rounded-lg" />
+            ) : (
+              <select
+                id="class"
+                value={selectedClass?.assignment_id || ''}
+                onChange={(e) => {
+                  const found = classes.find((c) => c.assignment_id === e.target.value)
+                  if (found) setSelectedClass(found)
+                }}
+                className={inputClass}
+              >
+                {classes.length === 0 ? (
+                  <option value="">No assigned classes</option>
+                ) : (
+                  classes.map((c) => (
+                    <option key={c.assignment_id} value={c.assignment_id}>
+                      {c.name} — {c.subject}
+                    </option>
+                  ))
+                )}
+              </select>
+            )}
           </div>
           <div>
             <label htmlFor="subject" className="mb-1.5 block text-sm font-medium text-ink">
               Subject
             </label>
-            <select id="subject" className={inputClass} defaultValue="math">
-              <option value="math">Mathematics</option>
+            <select id="subject" className={inputClass} disabled value={selectedClass?.subject || 'Mathematics'}>
+              <option value={selectedClass?.subject || 'Mathematics'}>
+                {selectedClass?.subject || 'Mathematics'}
+              </option>
             </select>
           </div>
           <div>
@@ -76,6 +146,14 @@ export function GradeEntry() {
           </div>
         </div>
       </Card>
+
+      {errorMessage && (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-center">
+          <p className="flex items-center justify-center gap-2 text-sm text-red-600 font-medium">
+            <CircleAlert className="size-4" /> {errorMessage}
+          </p>
+        </div>
+      )}
 
       <Card>
         <div className="mb-4 flex flex-wrap items-center gap-3">
