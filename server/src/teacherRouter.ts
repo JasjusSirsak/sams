@@ -91,6 +91,8 @@ teacherRouter.get('/classes', requireAuth, async (req: Request, res: Response) =
       return {
         id: a.teaching_assignment_id.toString(),
         assignment_id: a.teaching_assignment_id.toString(),
+        class_id: a.classes.class_id.toString(),
+        subject_id: a.subjects.subject_id.toString(),
         name: a.classes.name,
         subject: a.subjects.name,
         grade_level: a.classes.grade_level,

@@ -44,6 +44,8 @@ const ROLE_MAP: Record<string, Role> = {
   parent: 'parent',
   teacher: 'teacher',
   homeroom: 'homeroom',
+  admin: 'admin',
+  staff: 'staff',
   wali: 'homeroom',
   'wali kelas': 'homeroom',
 }

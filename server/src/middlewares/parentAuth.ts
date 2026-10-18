@@ -38,7 +38,7 @@ export async function verifyParentStudentAccess(req: Request, res: Response, nex
     // Role must be parent
     if (userRole !== 'parent' && userRole !== 'orang tua' && userRole !== 'wali murid') {
       return res.status(403).json({
-        message: 'Akses ditolak: Anda tidak memiliki wewenang atas data siswa ini',
+        message: 'Access denied. You are not authorized to access this student data.',
       })
     }
 
@@ -55,7 +55,7 @@ export async function verifyParentStudentAccess(req: Request, res: Response, nex
 
     if (!targetStudentId) {
       return res.status(400).json({
-        message: 'Parameter student_id tidak ditemukan atau tidak valid.',
+        message: 'The student_id parameter is missing or invalid.',
       })
     }
 
@@ -67,7 +67,7 @@ export async function verifyParentStudentAccess(req: Request, res: Response, nex
 
     if (!parent) {
       return res.status(403).json({
-        message: 'Akses ditolak: Anda tidak memiliki wewenang atas data siswa ini',
+        message: 'Access denied. You are not authorized to access this student data.',
       })
     }
 
@@ -83,7 +83,7 @@ export async function verifyParentStudentAccess(req: Request, res: Response, nex
 
     if (!parentStudentRelation) {
       return res.status(403).json({
-        message: 'Akses ditolak: Anda tidak memiliki wewenang atas data siswa ini',
+        message: 'Access denied. You are not authorized to access this student data.',
       })
     }
 

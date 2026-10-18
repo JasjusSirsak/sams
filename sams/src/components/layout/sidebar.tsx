@@ -1,7 +1,7 @@
 'use client'
 
 import { Link, usePathname } from '@/lib/nav'
-import { BookOpenCheck, CalendarDays, ClipboardCheck, GraduationCap, LayoutDashboard, ListChecks, Users } from 'lucide-react'
+import { BookOpenCheck, CalendarDays, ClipboardCheck, GraduationCap, LayoutDashboard, ListChecks, Users, BookOpen, CalendarClock, UserRoundCog } from 'lucide-react'
 import { useApp } from '@/lib/app-context'
 import { USERS } from '@/lib/data'
 import { canAccess, cn, getInitials } from '@/lib/helpers'
@@ -16,6 +16,16 @@ const NAV = [
       { href: '/grades', label: 'Grades', icon: BookOpenCheck },
       { href: '/students', label: 'Students', icon: Users },
       { href: '/agenda', label: 'Agenda', icon: CalendarDays },
+    ],
+  },
+  {
+    group: 'Manage',
+    items: [
+      { href: '/admin/classes', label: 'Manage Classes', icon: Users },
+      { href: '/admin/subjects', label: 'Manage Subjects', icon: BookOpen },
+      { href: '/admin/academic-periods', label: 'Manage Academic Periods', icon: CalendarClock },
+      { href: '/admin/teachers', label: 'Manage Teachers', icon: UserRoundCog },
+      { href: '/admin/students', label: 'Manage Students', icon: GraduationCap },
     ],
   },
 ]

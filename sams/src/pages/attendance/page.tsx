@@ -6,6 +6,7 @@ import { AttendanceRecap } from '@/components/attendance/attendance-recap'
 import { TodayAttendance } from '@/components/attendance/today-attendance'
 import { WeeklyChart } from '@/components/attendance/weekly-chart'
 import { ChildSelector } from '@/components/dashboard/child-selector'
+import { ParentAttendance } from '@/components/dashboard/parent-attendance'
 import { StudentTable } from '@/components/students/student-table'
 import { PageHeader } from '@/components/ui-kit'
 
@@ -28,14 +29,20 @@ export default function AttendancePage() {
   return (
     <>
       <PageHeader title="Attendance" subtitle={role === 'student' ? 'Check in daily and track your record' : "Monitor your child's attendance"} />
-      {role === 'parent' && <ChildSelector />}
-      <div className="grid gap-6 lg:grid-cols-3">
-        <div className="space-y-6 lg:col-span-2">
-          {role === 'student' && <TodayAttendance />}
-          <AttendanceHistory studentId={studentId} />
+      {role === 'parent' ? (
+        <div className="space-y-6">
+          <ChildSelector />
+          <ParentAttendance />
         </div>
-        <AttendanceRecap studentId={studentId} />
-      </div>
+      ) : (
+        <div className="grid gap-6 lg:grid-cols-3">
+          <div className="space-y-6 lg:col-span-2">
+            {role === 'student' && <TodayAttendance />}
+            <AttendanceHistory studentId={studentId} />
+          </div>
+          <AttendanceRecap studentId={studentId} />
+        </div>
+      )}
     </>
   )
 }

@@ -2,6 +2,7 @@
 
 import { useActiveStudentId, useApp } from '@/lib/app-context'
 import { ChildSelector } from '@/components/dashboard/child-selector'
+import { ParentGrades } from '@/components/dashboard/parent-grades'
 import { GradeEntry } from '@/components/grades/grade-entry'
 import { GradeTable } from '@/components/grades/grade-table'
 import { PageHeader } from '@/components/ui-kit'
@@ -22,8 +23,14 @@ export default function GradesPage() {
   return (
     <>
       <PageHeader title="Grades" subtitle={role === 'student' ? 'Your scores for this semester' : "Your child's academic performance"} />
-      {role === 'parent' && <ChildSelector />}
-      <GradeTable studentId={studentId} />
+      {role === 'parent' ? (
+        <div className="space-y-6">
+          <ChildSelector />
+          <ParentGrades />
+        </div>
+      ) : (
+        <GradeTable studentId={studentId} />
+      )}
     </>
   )
 }

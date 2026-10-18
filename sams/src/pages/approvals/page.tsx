@@ -11,7 +11,7 @@ export default function ApprovalsPage() {
 
   return (
     <>
-      <PageHeader title="Attendance approvals" subtitle="Review sick (Sakit) and permission (Izin) requests from your class." />
+      <PageHeader title="Attendance approvals" subtitle="Review sick and permission requests from your class." />
       <ApprovalList showReviewed />
     </>
   )

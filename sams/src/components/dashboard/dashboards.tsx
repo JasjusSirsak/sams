@@ -1,15 +1,16 @@
 import { useEffect, useState } from 'react'
 import { BookOpen, ClipboardCheck, ListChecks, Users } from 'lucide-react'
 import { useApp } from '@/lib/app-context'
-import { CHILDREN, TEACHER_CLASSES, USERS } from '@/lib/data'
+import { TEACHER_CLASSES, USERS } from '@/lib/data'
 import { getTeacherDashboardSummary, type TeacherDashboardSummary } from '@/lib/api'
 import { AgendaWidget } from '@/components/agenda/agenda-widget'
 import { ApprovalList } from '@/components/attendance/approval-list'
-import { AttendanceHistory } from '@/components/attendance/attendance-history'
 import { AttendanceRecap } from '@/components/attendance/attendance-recap'
 import { TodayAttendance } from '@/components/attendance/today-attendance'
 import { WeeklyChart } from '@/components/attendance/weekly-chart'
 import { GradeSummary } from '@/components/grades/grade-summary'
+import { ParentAttendance } from './parent-attendance'
+import { ParentGrades } from './parent-grades'
 import { MyClasses } from '@/components/grades/my-classes'
 import { StatCard } from '@/components/ui-kit'
 import { ChildSelector } from './child-selector'
@@ -40,22 +41,20 @@ export function StudentDashboard() {
 }
 
 export function ParentDashboard() {
-  const { childId, user: authUser } = useApp()
-  const child = CHILDREN.find((c) => c.id === childId) ?? CHILDREN[0]
+  const { user: authUser } = useApp()
   const mockUser = USERS.parent
   const name = authUser?.name || mockUser.name
 
   return (
     <>
-      <Hero name={name} subtitle={`Parent · Viewing ${child.name}, ${child.cls}`} />
+      <Hero name={name} subtitle="Parent · Monitor your child's attendance and grades" />
       <ChildSelector />
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
           <div className="grid gap-6 md:grid-cols-2">
-            <AttendanceRecap studentId={child.id} />
-            <GradeSummary studentId={child.id} />
+            <ParentAttendance />
+            <ParentGrades />
           </div>
-          <AttendanceHistory studentId={child.id} />
         </div>
         <AgendaWidget className="h-fit" />
       </div>

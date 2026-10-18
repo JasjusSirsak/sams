@@ -10,6 +10,9 @@ import attendanceRouter from './attendanceRouter'
 import gradesRouter from './gradesRouter'
 import homeroomRouter from './homeroomRouter'
 import journalsRouter from './journalsRouter'
+import parentRouter from './parentRouter'
+import reportsRouter from './reportsRouter'
+import adminRouter from './adminRouter'
 import { UPLOADS_DIR } from './middlewares/upload'
 import { requireAuth, requireRole } from './auth'
 
@@ -61,6 +64,15 @@ app.use('/api/homeroom', homeroomRouter)
 
 // KBM Journals module routing
 app.use('/api/journals', journalsRouter)
+
+// Parent portal module routing
+app.use('/api/parent', parentRouter)
+
+// Reports module routing
+app.use('/api/reports', reportsRouter)
+
+// Admin master-data routes
+app.use('/api/admin', adminRouter)
 
 // Teacher module routing (Apply RBAC directly to Teacher Module Router)
 app.use('/api/teacher', requireAuth, requireRole('teacher', 'homeroom'), teacherRouter)

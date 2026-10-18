@@ -1,7 +1,7 @@
 'use client'
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
-import { INITIAL_PENDING, type Approval, type AttendanceStatus, type PendingRequest, type Role } from './data'
+import { createContext, useContext, useEffect, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
+import { type PendingRequest, type Role } from './data'
 import {
   checkSession,
   getStoredUser,
@@ -11,14 +11,7 @@ import {
   type LoginCredentials,
   type User,
 } from './auth'
-
-export type TodayRecord = {
-  status: AttendanceStatus
-  note: string
-  evidence: string | null
-  approval: Approval
-  time: string
-}
+import { getHomeroomRequests } from './api'
 
 export type ReviewedRequest = PendingRequest & { decision: 'approved' | 'rejected' }
 
@@ -28,12 +21,9 @@ type AppState = {
   dark: boolean
   toggleDark: () => void
   childId: string
-  setChildId: (id: string) => void
+  setChildId: Dispatch<SetStateAction<string>>
   query: string
   setQuery: (q: string) => void
-  today: TodayRecord | null
-  submitToday: (r: Omit<TodayRecord, 'approval'>) => void
-  resetToday: () => void
   pending: PendingRequest[]
   reviewed: ReviewedRequest[]
   decide: (id: string, decision: 'approved' | 'rejected') => void
@@ -53,8 +43,6 @@ type AppState = {
 
 const AppContext = createContext<AppState | null>(null)
 
-const SELF_ID = 'self'
-
 export function AppProvider({ children }: { children: ReactNode }) {
   // Get initial stored user synchronously if present in localStorage (reduces flicker)
   const initialUser = typeof window !== 'undefined' ? getStoredUser() : null
@@ -64,10 +52,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState<boolean>(true)
 
   const [dark, setDark] = useState(false)
-  const [childId, setChildId] = useState('raka')
+  const [childId, setChildId] = useState('')
   const [query, setQuery] = useState('')
-  const [today, setToday] = useState<TodayRecord | null>(null)
-  const [pending, setPending] = useState<PendingRequest[]>(INITIAL_PENDING)
+  const [pending, setPending] = useState<PendingRequest[]>([])
   const [reviewed, setReviewed] = useState<ReviewedRequest[]>([])
 
   useEffect(() => {
@@ -109,6 +96,46 @@ export function AppProvider({ children }: { children: ReactNode }) {
       isMounted = false
     }
   }, [])
+
+  // Sync real attendance data & homeroom pending requests
+  useEffect(() => {
+    let isMounted = true
+    if (!user) return
+
+    // Homeroom and teacher accounts can review attendance requests.
+    if (role === 'homeroom' || role === 'teacher') {
+      getHomeroomRequests({ status: 'PENDING' })
+        .then((reqs) => {
+          if (!isMounted) return
+          const mapped: PendingRequest[] = reqs.map((r) => {
+            const dateObj = new Date(r.date)
+            const dateFormatted = isNaN(dateObj.getTime())
+              ? r.date
+              : dateObj.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })
+            const statusMapped = r.attendance_status === 'SICK' ? 'sakit' : 'izin'
+
+            return {
+              id: r.id || r.record_id,
+              student: r.student?.name || 'Unknown Student',
+              nis: r.student?.nis || '-',
+              status: statusMapped,
+              date: dateFormatted,
+              note: r.note || '',
+              evidence: r.document_url || '',
+            }
+          })
+          setPending(mapped)
+        })
+        .catch(() => {
+          // If homeroom query fails (e.g. teacher with no homeroom assignment), clear pending
+          if (isMounted) setPending([])
+        })
+    }
+
+    return () => {
+      isMounted = false
+    }
+  }, [user, role])
 
   async function checkAuthStatus() {
     setIsLoading(true)
@@ -157,39 +184,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     void logout()
   }
 
-  function submitToday(record: Omit<TodayRecord, 'approval'>) {
-    const needsApproval = record.status === 'izin' || record.status === 'sakit'
-    setToday({ ...record, approval: needsApproval ? 'pending' : 'approved' })
-    if (needsApproval) {
-      setPending((list) => [
-        {
-          id: SELF_ID,
-          student: 'Raka Pratama',
-          nis: '2024101',
-          status: record.status as 'izin' | 'sakit',
-          date: 'Wed, 7 Oct',
-          note: record.note,
-          evidence: record.evidence ?? '',
-        },
-        ...list.filter((p) => p.id !== SELF_ID),
-      ])
-    }
-  }
-
-  function resetToday() {
-    setToday(null)
-    setPending((list) => list.filter((p) => p.id !== SELF_ID))
-    setReviewed((list) => list.filter((p) => p.id !== SELF_ID))
-  }
-
   function decide(id: string, decision: 'approved' | 'rejected') {
     const item = pending.find((p) => p.id === id)
     if (!item) return
     setPending((list) => list.filter((p) => p.id !== id))
     setReviewed((list) => [{ ...item, decision }, ...list])
-    if (id === SELF_ID) {
-      setToday((t) => (t ? { ...t, approval: decision, status: decision === 'rejected' ? 'alfa' : t.status } : t))
-    }
   }
 
   const isAuthenticated = user !== null
@@ -205,9 +204,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setChildId,
         query,
         setQuery,
-        today,
-        submitToday,
-        resetToday,
         pending,
         reviewed,
         decide,

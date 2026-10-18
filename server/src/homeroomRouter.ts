@@ -50,7 +50,7 @@ async function getHomeroomTeacherAssignments(userId: string) {
  * Retrieve pending attendance/permission/sick requests for the homeroom teacher's assigned class(es).
  */
 homeroomRouter.get(
-  '/attendance-requests',
+  ['/', '/attendance-requests', '/requests'],
   requireAuth,
   requireRole('homeroom', 'teacher', 'admin', 'staff'),
   async (req: Request, res: Response) => {
@@ -170,7 +170,7 @@ homeroomRouter.get(
  * Approve or reject an attendance permission/sick request.
  */
 homeroomRouter.patch(
-  '/attendance-requests/:recordId',
+  ['/attendance-requests/:recordId', '/requests/:recordId', '/:recordId'],
   requireAuth,
   requireRole('homeroom', 'teacher', 'admin', 'staff'),
   async (req: Request, res: Response) => {
@@ -283,6 +283,112 @@ homeroomRouter.patch(
       })
     } catch (error) {
       console.error('Failed to update attendance request:', error)
+      return res.status(500).json({
+        message: 'Internal server error while updating attendance request.',
+      })
+    }
+  }
+)
+
+homeroomRouter.post(
+  ['/approve', '/reject'],
+  requireAuth,
+  requireRole('homeroom', 'teacher', 'admin', 'staff'),
+  async (req: Request, res: Response) => {
+    try {
+      const sessionUser = req.user!
+      const userRole = (sessionUser.role || '').toLowerCase()
+      const recordId = parseBigIntSafe(req.body.record_id ?? req.body.recordId ?? req.body.id)
+
+      if (!recordId) {
+        return res.status(400).json({
+          message: 'Invalid or missing record ID in request body.',
+        })
+      }
+
+      const isApprove = req.path.endsWith('approve')
+      const targetStatus: ApprovalStatus = isApprove ? 'APPROVED' : 'REJECTED'
+      const optionalNote: string | undefined =
+        typeof (req.body.note ?? req.body.notes) === 'string'
+          ? (req.body.note ?? req.body.notes).trim()
+          : undefined
+
+      const record = await prisma.attendance_records.findUnique({
+        where: { attendance_record_id: recordId },
+        include: {
+          attendance_sessions: {
+            include: {
+              classes: { select: { class_id: true, name: true } },
+            },
+          },
+          students: { select: { student_id: true, name: true } },
+        },
+      })
+
+      if (!record) {
+        return res.status(404).json({
+          message: `Attendance request with ID ${recordId.toString()} not found.`,
+        })
+      }
+
+      if (userRole === 'homeroom' || userRole === 'teacher') {
+        const teacher = await getHomeroomTeacherAssignments(sessionUser.userId)
+        if (!teacher || teacher.homeroom_assignments.length === 0) {
+          return res.status(403).json({
+            message: 'Forbidden. You are not assigned as a homeroom teacher for any class.',
+          })
+        }
+        const isHomeroomOfClass = teacher.homeroom_assignments.some(
+          (ha) => ha.class_id === record.attendance_sessions.class_id
+        )
+        if (!isHomeroomOfClass) {
+          return res.status(403).json({
+            message: `Forbidden. You do not have permission to review attendance for class "${record.attendance_sessions.classes.name}". You are not the assigned homeroom teacher for this class.`,
+          })
+        }
+      }
+
+      const updateData: any = {
+        approval_status: targetStatus,
+        approved_by: BigInt(sessionUser.userId),
+        approved_at: new Date(),
+      }
+
+      if (optionalNote !== undefined && optionalNote !== '') {
+        updateData.note = record.note
+          ? `${record.note} (Homeroom Note: ${optionalNote})`
+          : optionalNote
+      }
+
+      const updatedRecord = await prisma.attendance_records.update({
+        where: { attendance_record_id: recordId },
+        data: updateData,
+        include: {
+          students: { select: { name: true, nis: true } },
+          attendance_sessions: {
+            include: { classes: { select: { name: true } } },
+          },
+          users: { select: { username: true } },
+        },
+      })
+
+      return res.status(200).json({
+        message: `Attendance request for student "${updatedRecord.students.name}" has been ${targetStatus.toLowerCase()}.`,
+        data: {
+          record_id: updatedRecord.attendance_record_id.toString(),
+          session_id: updatedRecord.attendance_session_id.toString(),
+          class_name: updatedRecord.attendance_sessions.classes.name,
+          student_name: updatedRecord.students.name,
+          student_nis: updatedRecord.students.nis,
+          attendance_status: updatedRecord.status,
+          approval_status: updatedRecord.approval_status,
+          note: updatedRecord.note,
+          approved_by: updatedRecord.users?.username ?? sessionUser.username,
+          approved_at: updatedRecord.approved_at,
+        },
+      })
+    } catch (error) {
+      console.error('Failed to update attendance request via POST:', error)
       return res.status(500).json({
         message: 'Internal server error while updating attendance request.',
       })

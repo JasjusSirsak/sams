@@ -1,32 +1,110 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from '@/lib/nav'
-import { Eye, Paperclip } from 'lucide-react'
+import { AlertCircle, Eye, Paperclip, RefreshCw } from 'lucide-react'
 import { useApp } from '@/lib/app-context'
-import { reviewRequest } from '@/lib/api'
-import type { PendingRequest } from '@/lib/data'
+import { getHomeroomRequests, reviewRequest, type HomeroomAttendanceRequest } from '@/lib/api'
+import type { AttendanceStatus, PendingRequest } from '@/lib/data'
 import { cn } from '@/lib/helpers'
-import { Avatar, Card, CardLabel, EmptyState, Pill, Spinner, StatusBadge, buttonPrimary, buttonSecondary } from '@/components/ui-kit'
+import {
+  Avatar,
+  Card,
+  CardLabel,
+  EmptyState,
+  Pill,
+  Skeleton,
+  Spinner,
+  StatusBadge,
+  buttonPrimary,
+  buttonSecondary,
+} from '@/components/ui-kit'
 
 type Action = { item: PendingRequest; decision: 'approved' | 'rejected' }
 
-const initials = (name: string) => name.split(' ').map((p) => p[0]).join('').slice(0, 2)
+const initials = (name: string) =>
+  name
+    .split(' ')
+    .map((p) => p[0])
+    .join('')
+    .slice(0, 2)
 
 export function ApprovalList({ limit, showReviewed = false }: { limit?: number; showReviewed?: boolean }) {
-  const { pending, reviewed, decide } = useApp()
+  const { reviewed, decide } = useApp()
+  const [requests, setRequests] = useState<PendingRequest[]>([])
+  const [loading, setLoading] = useState<boolean>(true)
+  const [error, setError] = useState<string | null>(null)
   const [action, setAction] = useState<Action | null>(null)
   const [busy, setBusy] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
 
-  const items = limit ? pending.slice(0, limit) : pending
+  function loadRequests() {
+    setLoading(true)
+    setError(null)
+    getHomeroomRequests({ status: 'PENDING' })
+      .then((data: HomeroomAttendanceRequest[]) => {
+        const mapped: PendingRequest[] = data.map((r) => {
+          const dateObj = new Date(r.date)
+          const dateFormatted = isNaN(dateObj.getTime())
+            ? r.date
+            : dateObj.toLocaleDateString('en-GB', {
+                weekday: 'short',
+                day: 'numeric',
+                month: 'short',
+              })
+
+          const statusMapped: AttendanceStatus = r.attendance_status === 'SICK' ? 'sakit' : 'izin'
+
+          return {
+            id: r.id || r.record_id,
+            student: r.student?.name || 'Unknown Student',
+            nis: r.student?.nis || '-',
+            status: statusMapped as 'izin' | 'sakit',
+            date: dateFormatted,
+            note: r.note || '',
+            evidence: r.document_url || '',
+          }
+        })
+        setRequests(mapped)
+        setLoading(false)
+      })
+      .catch((err) => {
+        console.error('Failed to load homeroom requests:', err)
+        setError(
+          err?.response?.data?.message ||
+            err?.message ||
+            'Failed to fetch pending approval requests from server.'
+        )
+        setLoading(false)
+      })
+  }
+
+  useEffect(() => {
+    loadRequests()
+  }, [])
+
+  const items = limit ? requests.slice(0, limit) : requests
 
   async function confirm() {
     if (!action) return
     setBusy(true)
-    await reviewRequest(action.item.id, action.decision)
-    decide(action.item.id, action.decision)
-    setBusy(false)
-    setAction(null)
+    setActionError(null)
+    try {
+      await reviewRequest(action.item.id, action.decision)
+      // Remove from local list and update app state
+      setRequests((prev) => prev.filter((r) => r.id !== action.item.id))
+      decide(action.item.id, action.decision)
+      setAction(null)
+    } catch (err: any) {
+      console.error('Failed to submit approval review:', err)
+      setActionError(
+        err?.response?.data?.message ||
+          err?.message ||
+          'Failed to submit approval review. Please try again.'
+      )
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -34,19 +112,60 @@ export function ApprovalList({ limit, showReviewed = false }: { limit?: number; 
       <Card>
         <CardLabel
           action={
-            limit && pending.length > 0 ? (
-              <Link href="/approvals" className="text-sm font-medium text-primary hover:underline">
-                View all
-              </Link>
-            ) : (
-              <Pill className="bg-warning/15 text-warning">{pending.length} pending</Pill>
-            )
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={loadRequests}
+                disabled={loading}
+                title="Refresh requests"
+                className="text-xs text-muted hover:text-ink transition flex items-center gap-1"
+              >
+                <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} />
+              </button>
+              {limit && requests.length > 0 ? (
+                <Link href="/approvals" className="text-sm font-medium text-primary hover:underline">
+                  View all
+                </Link>
+              ) : (
+                <Pill className="bg-warning/15 text-warning">{requests.length} pending</Pill>
+              )}
+            </div>
           }
         >
           Pending attendance approval
         </CardLabel>
 
-        {items.length === 0 ? (
+        {loading ? (
+          <div className="space-y-3">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="flex items-start gap-3 rounded-xl border border-line p-4">
+                <Skeleton className="size-9 rounded-full shrink-0" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-3 w-48" />
+                  <Skeleton className="h-3 w-full" />
+                </div>
+                <div className="flex gap-2">
+                  <Skeleton className="h-8 w-16 rounded-xl" />
+                  <Skeleton className="h-8 w-16 rounded-xl" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : error ? (
+          <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-center">
+            <p className="flex items-center justify-center gap-2 text-sm font-medium text-red-600">
+              <AlertCircle className="size-4 shrink-0" /> {error}
+            </p>
+            <button
+              type="button"
+              onClick={loadRequests}
+              className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-red-100 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-200 transition"
+            >
+              <RefreshCw className="size-3.5" /> Try again
+            </button>
+          </div>
+        ) : items.length === 0 ? (
           <EmptyState title="All caught up" text="There are no sick or permission requests waiting for review." />
         ) : (
           <ul className="space-y-3">
@@ -131,7 +250,13 @@ export function ApprovalList({ limit, showReviewed = false }: { limit?: number; 
             </div>
 
             {action.decision === 'rejected' && (
-              <p className="mt-4 text-sm text-danger">This attendance will be recorded as Alfa (absent).</p>
+              <p className="mt-4 text-sm text-danger">This attendance will be recorded as absent.</p>
+            )}
+
+            {actionError && (
+              <p role="alert" className="mt-3 flex items-center gap-1.5 text-xs text-danger font-medium">
+                <AlertCircle className="size-4 shrink-0" /> {actionError}
+              </p>
             )}
 
             <div className="mt-6 flex justify-end gap-2">
@@ -145,7 +270,7 @@ export function ApprovalList({ limit, showReviewed = false }: { limit?: number; 
                 className={cn(buttonPrimary, action.decision === 'rejected' && 'bg-danger text-white')}
               >
                 {busy && <Spinner />}
-                {action.decision === 'approved' ? 'Approve' : 'Reject as Alfa'}
+                {action.decision === 'approved' ? 'Approve' : 'Reject as Absent'}
               </button>
             </div>
           </div>

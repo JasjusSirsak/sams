@@ -1,57 +1,75 @@
 'use client'
 
 import { useState } from 'react'
-import { CircleCheck, Download } from 'lucide-react'
+import { AlertCircle, CircleCheck } from 'lucide-react'
 import { generateReport } from '@/lib/api'
-import { GRADE_ENTRY } from '@/lib/data'
-import { average, finalScore } from '@/lib/helpers'
-import { Card, CardLabel, ProgressBar, Spinner, buttonPrimary } from '@/components/ui-kit'
-
-const SUBJECT_AVERAGES = [
-  { subject: 'Mathematics', avg: average(GRADE_ENTRY['xi-ipa-2'].map(finalScore).filter((s): s is number => s != null)) },
-  { subject: 'Physics', avg: 84.6 },
-  { subject: 'Chemistry', avg: 80.2 },
-  { subject: 'English', avg: 86.9 },
-]
+import { Card, CardLabel, Spinner, buttonPrimary, inputClass } from '@/components/ui-kit'
 
 export function ReportCard() {
-  const [state, setState] = useState<'idle' | 'loading' | 'done'>('idle')
+  const [classId, setClassId] = useState('')
+  const [state, setState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
   const [file, setFile] = useState('')
+  const [error, setError] = useState('')
 
   async function handleGenerate() {
     setState('loading')
-    const res = await generateReport('XI IPA 2')
-    setFile(res.file)
-    setState('done')
+    setError('')
+    try {
+      const result = await generateReport(classId)
+      setFile(result.file)
+      setState('done')
+    } catch (requestError: unknown) {
+      setError(
+        typeof requestError === 'object' && requestError !== null && 'message' in requestError &&
+          typeof requestError.message === 'string'
+          ? requestError.message
+          : 'Failed to generate the attendance report.',
+      )
+      setState('error')
+    }
   }
 
   return (
     <Card>
-      <CardLabel>Grade recap · XI IPA 2</CardLabel>
-      <ul className="space-y-3">
-        {SUBJECT_AVERAGES.map((s) => (
-          <li key={s.subject}>
-            <div className="mb-1 flex justify-between text-sm">
-              <span className="text-ink">{s.subject}</span>
-              <span className="font-semibold text-ink">{s.avg}</span>
-            </div>
-            <ProgressBar value={s.avg} label={`${s.subject} class average`} />
-          </li>
-        ))}
-      </ul>
+      <CardLabel>Attendance report</CardLabel>
+      <p className="mb-4 text-sm text-muted">Download a PDF summary for a class.</p>
+      <label htmlFor="attendance-report-class-id" className="mb-2 block text-sm font-medium text-ink">
+        Class ID
+      </label>
+      <input
+        id="attendance-report-class-id"
+        type="number"
+        min="1"
+        value={classId}
+        onChange={(event) => {
+          setClassId(event.target.value)
+          setState('idle')
+        }}
+        className={inputClass}
+        placeholder="Enter class ID"
+      />
 
-      <div className="mt-5 border-t border-line pt-4">
+      <div className="mt-4">
         {state === 'done' ? (
           <p className="flex items-center gap-2 text-sm text-ink" role="status">
             <CircleCheck className="size-4 text-success" aria-hidden="true" />
-            Report ready: <span className="font-medium">{file}</span>
-            <Download className="ml-auto size-4 text-primary" aria-label="Download" />
+            Downloaded {file}
           </p>
         ) : (
-          <button type="button" onClick={handleGenerate} disabled={state === 'loading'} className={buttonPrimary}>
+          <button
+            type="button"
+            onClick={() => void handleGenerate()}
+            disabled={state === 'loading' || !classId}
+            className={buttonPrimary}
+          >
             {state === 'loading' && <Spinner />}
-            {state === 'loading' ? 'Generating...' : 'Generate semester recap'}
+            {state === 'loading' ? 'Generating...' : 'Download PDF report'}
           </button>
+        )}
+        {state === 'error' && (
+          <p role="alert" className="mt-3 flex items-center gap-2 text-sm text-danger">
+            <AlertCircle className="size-4" aria-hidden="true" /> {error}
+          </p>
         )}
       </div>
     </Card>

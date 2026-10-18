@@ -50,12 +50,17 @@ export function cn(...classes: (string | false | null | undefined)[]) {
 
 // Which pages each role may open. UX only — the backend must still authorize.
 export const ACCESS: Record<string, Role[]> = {
-  '/': ['student', 'parent', 'teacher', 'homeroom'],
+  '/': ['student', 'parent', 'teacher', 'homeroom', 'admin', 'staff'],
   '/approvals': ['homeroom'],
   '/attendance': ['student', 'parent', 'teacher', 'homeroom'],
   '/grades': ['student', 'parent', 'teacher', 'homeroom'],
   '/students': ['teacher', 'homeroom'],
   '/agenda': ['student', 'parent', 'teacher', 'homeroom'],
+  '/admin/classes': ['admin', 'staff'],
+  '/admin/subjects': ['admin', 'staff'],
+  '/admin/academic-periods': ['admin', 'staff'],
+  '/admin/teachers': ['admin', 'staff'],
+  '/admin/students': ['admin', 'staff'],
 }
 
 export const canAccess = (role: Role, href: string) => (ACCESS[href] ?? []).includes(role)

@@ -10,6 +10,7 @@ import ApprovalsPage from './pages/approvals/page'
 import AttendancePage from './pages/attendance/page'
 import GradesPage from './pages/grades/page'
 import StudentsPage from './pages/students/page'
+import AdminMasterDataPage from './pages/admin/master-data-page'
 
 /**
  * Wrapper component for routes that require authentication.
@@ -78,6 +79,7 @@ export function PublicOnlyRoute({ children }: { children: ReactNode }) {
 
 function DashboardPage() {
   const { role } = useApp()
+  if (role === 'admin' || role === 'staff') return <AdminMasterDataPage />
   if (role === 'parent') return <ParentDashboard />
   if (role === 'teacher') return <TeacherDashboard />
   if (role === 'homeroom') return <HomeroomDashboard />
@@ -103,9 +105,11 @@ function AppRoutes() {
           {pathname === '/attendance' && <AttendancePage />}
           {pathname === '/grades' && <GradesPage />}
           {pathname === '/students' && <StudentsPage />}
+          {pathname.startsWith('/admin/') && <AdminMasterDataPage />}
           {pathname === '/agenda' && <AgendaPage />}
           {pathname === '/' && <DashboardPage />}
-          {!['/approvals', '/attendance', '/grades', '/students', '/agenda', '/'].includes(pathname) && (
+          {!['/approvals', '/attendance', '/grades', '/students', '/agenda', '/'].includes(pathname) &&
+            !pathname.startsWith('/admin/') && (
             <DashboardPage />
           )}
         </AppShell>
