@@ -10,7 +10,7 @@ export const CATEGORY_COLOR: Record<AgendaCategory, string> = {
   exam: 'var(--danger)',
 }
 
-export function AgendaEvent({ event }: { event: AgendaItem }) {
+export function AgendaEvent({ event }: { event: AgendaItem & { displayLabel?: string } }) {
   return (
     <li className="flex gap-3 border-l-4 pl-3" style={{ borderColor: CATEGORY_COLOR[event.category] }}>
       <div className="min-w-0 flex-1">
@@ -24,7 +24,7 @@ export function AgendaEvent({ event }: { event: AgendaItem }) {
           </span>
         </p>
       </div>
-      <Pill className="h-fit bg-surface-muted text-muted">{event.category}</Pill>
+      <Pill className="h-fit bg-surface-muted text-muted">{event.displayLabel ?? event.category}</Pill>
     </li>
   )
 }

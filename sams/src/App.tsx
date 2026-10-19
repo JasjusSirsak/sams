@@ -2,7 +2,7 @@ import { useEffect, type ReactNode } from 'react'
 import { AuthProvider, useApp } from './lib/app-context'
 import { NavProvider, usePathname, useRouter } from './lib/nav'
 import { AppShell } from './components/layout/app-shell'
-import { Spinner } from './components/ui-kit'
+import { Forbidden, Spinner } from './components/ui-kit'
 import { HomeroomDashboard, ParentDashboard, StudentDashboard, TeacherDashboard } from './components/dashboard/dashboards'
 import LoginPage from './pages/login/login'
 import AgendaPage from './pages/agenda/page'
@@ -11,6 +11,8 @@ import AttendancePage from './pages/attendance/page'
 import GradesPage from './pages/grades/page'
 import StudentsPage from './pages/students/page'
 import AdminMasterDataPage from './pages/admin/master-data-page'
+import NotFoundPage from './pages/not-found'
+import { ACCESS, canAccess } from './lib/helpers'
 
 /**
  * Wrapper component for routes that require authentication.
@@ -86,6 +88,11 @@ function DashboardPage() {
   return <StudentDashboard />
 }
 
+function RouteAccessGuard({ path, children }: { path: string; children: ReactNode }) {
+  const { role } = useApp()
+  return canAccess(role, path) ? <>{children}</> : <Forbidden />
+}
+
 function AppRoutes() {
   const pathname = usePathname()
 
@@ -97,20 +104,29 @@ function AppRoutes() {
     )
   }
 
+  let page: ReactNode = null
+  let accessPath: string | null = pathname
+
+  if (pathname === '/') page = <DashboardPage />
+  else if (pathname === '/approvals') page = <ApprovalsPage />
+  else if (pathname === '/attendance') page = <AttendancePage />
+  else if (pathname === '/grades') page = <GradesPage />
+  else if (pathname === '/students') page = <StudentsPage />
+  else if (pathname === '/agenda') page = <AgendaPage />
+  else if (pathname.startsWith('/admin/') && Object.prototype.hasOwnProperty.call(ACCESS, pathname)) {
+    page = <AdminMasterDataPage />
+  } else {
+    accessPath = null
+  }
+
   return (
     <ProtectedRoute>
       <div className="font-sans antialiased">
         <AppShell>
-          {pathname === '/approvals' && <ApprovalsPage />}
-          {pathname === '/attendance' && <AttendancePage />}
-          {pathname === '/grades' && <GradesPage />}
-          {pathname === '/students' && <StudentsPage />}
-          {pathname.startsWith('/admin/') && <AdminMasterDataPage />}
-          {pathname === '/agenda' && <AgendaPage />}
-          {pathname === '/' && <DashboardPage />}
-          {!['/approvals', '/attendance', '/grades', '/students', '/agenda', '/'].includes(pathname) &&
-            !pathname.startsWith('/admin/') && (
-            <DashboardPage />
+          {accessPath ? (
+            <RouteAccessGuard path={accessPath}>{page}</RouteAccessGuard>
+          ) : (
+            <NotFoundPage />
           )}
         </AppShell>
       </div>

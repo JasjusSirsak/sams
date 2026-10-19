@@ -13,6 +13,7 @@ import journalsRouter from './journalsRouter'
 import parentRouter from './parentRouter'
 import reportsRouter from './reportsRouter'
 import adminRouter from './adminRouter'
+import agendaRouter from './agendaRouter'
 import { UPLOADS_DIR } from './middlewares/upload'
 import { requireAuth, requireRole } from './auth'
 
@@ -73,6 +74,9 @@ app.use('/api/reports', reportsRouter)
 
 // Admin master-data routes
 app.use('/api/admin', adminRouter)
+
+// Shared agenda for authenticated users; role and data scope are resolved in its service.
+app.use('/api/agenda', agendaRouter)
 
 // Teacher module routing (Apply RBAC directly to Teacher Module Router)
 app.use('/api/teacher', requireAuth, requireRole('teacher', 'homeroom'), teacherRouter)

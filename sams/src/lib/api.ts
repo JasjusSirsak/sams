@@ -316,18 +316,20 @@ export async function getTeacherWeeklyAttendance(): Promise<TeacherWeeklyAttenda
   return response.data.data
 }
 
-export type TeacherAgendaItem = {
+export type SharedAgendaItem = {
   id: string
+  source: 'agenda' | 'schedule'
   title: string
-  description: string
-  date: string
-  time: string
-  place: string
-  category: 'school' | 'academic' | 'assignment' | 'meeting' | 'exam'
+  startTime: string | null
+  endTime: string | null
+  location: string | null
+  label: string
+  note: string | null
+  className: string | null
 }
 
-export async function getTeacherAgendas(params?: { date?: string; start_date?: string; end_date?: string }): Promise<TeacherAgendaItem[]> {
-  const response = await apiClient.get<{ data: TeacherAgendaItem[] }>('/teacher/agendas', { params })
+export async function getSharedAgenda(params: { date: string; studentId?: string }): Promise<SharedAgendaItem[]> {
+  const response = await apiClient.get<{ data: SharedAgendaItem[] }>('/agenda', { params })
   return response.data.data
 }
 

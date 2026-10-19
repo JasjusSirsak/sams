@@ -11,10 +11,8 @@ import {
   type AdminEntity,
 } from '@/lib/api'
 import { parseApiError } from '@/lib/apiClient'
-import { useApp } from '@/lib/app-context'
 import { usePathname } from '@/lib/nav'
-import { canAccess } from '@/lib/helpers'
-import { Card, EmptyState, Forbidden, PageHeader, Spinner, buttonPrimary, buttonSecondary, inputClass } from '@/components/ui-kit'
+import { Card, EmptyState, PageHeader, Spinner, buttonPrimary, buttonSecondary, inputClass } from '@/components/ui-kit'
 
 type Field = {
   name: string
@@ -92,7 +90,6 @@ function displayValue(value: unknown): string {
 }
 
 function AdminMasterDataPage() {
-  const { role } = useApp()
   const pathname = usePathname()
   const pathEntity = pathname.startsWith('/admin/') ? pathname.slice('/admin/'.length) : 'classes'
   const entity = ENTITY_PATHS.includes(pathEntity as AdminEntity) ? pathEntity as AdminEntity : 'classes'
@@ -132,8 +129,6 @@ function AdminMasterDataPage() {
   const records = result.key === currentKey ? result.records : null
   const error = result.key === currentKey ? result.error : null
   const loading = records === null && error === null
-
-  if (!canAccess(role, `/admin/${entity}`)) return <Forbidden />
 
   function openCreate() {
     setFormValues(Object.fromEntries(config.fields.map((field) => [field.name, ''])))

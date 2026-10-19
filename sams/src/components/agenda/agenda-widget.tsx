@@ -1,20 +1,39 @@
 import { useEffect, useState } from 'react'
 import { ChevronLeft, ChevronRight, AlertCircle, RefreshCw } from 'lucide-react'
-import { getTeacherAgendas, type TeacherAgendaItem } from '@/lib/api'
+import { getSharedAgenda } from '@/lib/api'
+import type { AgendaCategory, AgendaItem } from '@/lib/data'
+import { useApp } from '@/lib/app-context'
 import { cn, formatShort, fromKey, shortDay, toKey } from '@/lib/helpers'
 import { Card, CardLabel, Skeleton } from '@/components/ui-kit'
 import { AgendaEvent } from './agenda-event'
 
+function getAgendaCategory(label: string, source: 'agenda' | 'schedule'): AgendaCategory {
+  if (source === 'schedule') return 'academic'
+
+  switch (label) {
+    case 'school':
+    case 'academic':
+    case 'assignment':
+    case 'meeting':
+    case 'exam':
+      return label
+    default:
+      return 'school'
+  }
+}
+
 export function AgendaWidget({ className }: { className?: string }) {
+  const { role, childId } = useApp()
   // Real-time actual date as today anchor
   const [todayDate] = useState(() => new Date())
   // Currently focused date for 7-day strip
   const [baseDate, setBaseDate] = useState<Date>(() => new Date())
   const [selectedKey, setSelectedKey] = useState<string>(() => toKey(new Date()))
 
-  const [agendas, setAgendas] = useState<TeacherAgendaItem[]>([])
+  const [agendas, setAgendas] = useState<(AgendaItem & { displayLabel?: string })[]>([])
   const [loading, setLoading] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
+  const [requestVersion, setRequestVersion] = useState(0)
 
   // Generate 7 days centered on baseDate (-3 to +3)
   const weekDays = Array.from({ length: 7 }, (_, i) => {
@@ -23,26 +42,71 @@ export function AgendaWidget({ className }: { className?: string }) {
     return d
   })
 
-  const startDateStr = toKey(weekDays[0])
-  const endDateStr = toKey(weekDays[6])
+  const dateRangeKey = weekDays.map(toKey).join(',')
 
-  function fetchAgendas() {
-    setLoading(true)
-    setError(null)
-    getTeacherAgendas({ start_date: startDateStr, end_date: endDateStr })
-      .then((data) => {
-        setAgendas(data)
+  useEffect(() => {
+    let isActive = true
+
+    if (role === 'parent' && !childId) {
+      Promise.resolve().then(() => {
+        if (!isActive) return
+        setAgendas([])
+        setLoading(false)
+        setError(null)
+      })
+      return () => {
+        isActive = false
+      }
+    }
+
+    const dates = dateRangeKey.split(',')
+    Promise.resolve()
+      .then(() => {
+        if (!isActive) return null
+        setLoading(true)
+        setError(null)
+        return Promise.all(
+          dates.map((date) =>
+            getSharedAgenda({
+              date,
+              ...(role === 'parent' ? { studentId: childId } : {}),
+            }),
+          ),
+        )
+      })
+      .then((results) => {
+        if (!isActive || !results) return
+        setAgendas(
+          results.flatMap((items, index) =>
+            items.map((item) => {
+              return {
+                id: item.id,
+                date: dates[index],
+                time: item.startTime
+                  ? item.endTime
+                    ? `${item.startTime} - ${item.endTime}`
+                    : item.startTime
+                  : 'All day',
+                title: item.title,
+                place: item.location ?? '',
+                category: getAgendaCategory(item.label, item.source),
+                displayLabel: item.label,
+              }
+            }),
+          ),
+        )
         setLoading(false)
       })
       .catch((err) => {
+        if (!isActive) return
         setError(err?.message || 'Failed to load agendas.')
         setLoading(false)
       })
-  }
 
-  useEffect(() => {
-    fetchAgendas()
-  }, [startDateStr, endDateStr])
+    return () => {
+      isActive = false
+    }
+  }, [childId, dateRangeKey, requestVersion, role])
 
   // Filter events for selected date
   const eventsForSelected = agendas.filter((a) => a.date === selectedKey)
@@ -161,7 +225,7 @@ export function AgendaWidget({ className }: { className?: string }) {
           </p>
           <button
             type="button"
-            onClick={fetchAgendas}
+            onClick={() => setRequestVersion((version) => version + 1)}
             className="mt-2 inline-flex items-center gap-1 rounded bg-red-100 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-200 transition"
           >
             <RefreshCw className="size-3" /> Retry
@@ -181,4 +245,3 @@ export function AgendaWidget({ className }: { className?: string }) {
     </Card>
   )
 }
-

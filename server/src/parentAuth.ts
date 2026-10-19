@@ -5,9 +5,14 @@ import prisma from './db'
  * Safely parse BigInt from string/number
  */
 export function parseBigIntSafe(val: unknown): bigint | null {
-  if (val === undefined || val === null || val === '') return null
+  if (typeof val === 'bigint') return val > 0n ? val : null
+  if (typeof val === 'number') {
+    return Number.isSafeInteger(val) && val > 0 ? BigInt(val) : null
+  }
+  if (typeof val !== 'string' || !/^[1-9]\d*$/.test(val)) return null
+
   try {
-    return BigInt(val.toString())
+    return BigInt(val)
   } catch {
     return null
   }
