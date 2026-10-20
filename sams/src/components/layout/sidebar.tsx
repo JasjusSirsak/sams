@@ -31,7 +31,7 @@ const NAV = [
 ]
 
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
-  const { role, pending, user: authUser } = useApp()
+  const { role, pending, user: authUser, isHomeroom } = useApp()
   const pathname = usePathname()
   const mockUser = USERS[role]
 
@@ -65,7 +65,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 
       <nav aria-label="Main" className="flex-1 space-y-5 overflow-y-auto">
         {NAV.map((section) => {
-          const items = section.items.filter((item) => canAccess(role, item.href))
+          const items = section.items.filter((item) => canAccess(role, item.href, isHomeroom))
           if (items.length === 0) return null
           return (
             <div key={section.group}>

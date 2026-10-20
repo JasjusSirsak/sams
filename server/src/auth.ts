@@ -59,6 +59,14 @@ export function clearAuthCookie(res: Response) {
   })
 }
 
+function normalizeRoleName(roleName: string): string {
+  const role = roleName.trim().toLowerCase()
+  if (['teacher', 'guru', 'homeroom', 'wali', 'wali kelas'].includes(role)) return 'teacher'
+  if (['student', 'siswa'].includes(role)) return 'student'
+  if (['parent', 'orang tua', 'wali murid'].includes(role)) return 'parent'
+  return role
+}
+
 /**
  * Authentication middleware with real-time database active account check & token verification
  */
@@ -75,15 +83,28 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     })
   }
 
+  let decoded: JwtSessionPayload
+  let userId: bigint
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as JwtSessionPayload
-
-    // Verify current account status in the database (prevents disabled accounts from accessing resources)
-    const user = await prisma.users.findUnique({
-      where: { user_id: BigInt(decoded.userId) },
-      select: { is_active: true, role_id: true, roles: { select: { name: true } } },
+    decoded = jwt.verify(token, JWT_SECRET) as JwtSessionPayload
+    userId = BigInt(decoded.userId)
+  } catch {
+    clearAuthCookie(res)
+    return res.status(401).json({
+      message: 'Session has expired or is invalid. Please log in again.',
     })
-
+  }
+  try {
+    // Verify current account status and role in the database.
+    const user = await prisma.users.findUnique({
+      where: { user_id: userId },
+      select: {
+        user_id: true,
+        role_id: true,
+        is_active: true,
+        roles: { select: { name: true } },
+      },
+    })
     if (!user || !user.is_active) {
       clearAuthCookie(res)
       return res.status(401).json({
@@ -91,14 +112,16 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       })
     }
 
-    req.user = decoded
-    return next()
+    req.user = {
+      ...decoded,
+      userId: user.user_id.toString(),
+      role: normalizeRoleName(user.roles.name),
+    }
   } catch (error) {
-    clearAuthCookie(res)
-    return res.status(401).json({
-      message: 'Session has expired or is invalid. Please log in again.',
-    })
+    return next(error)
   }
+
+  return next()
 }
 
 /**

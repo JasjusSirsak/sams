@@ -14,8 +14,8 @@ import parentRouter from './parentRouter'
 import reportsRouter from './reportsRouter'
 import adminRouter from './adminRouter'
 import agendaRouter from './agendaRouter'
-import { UPLOADS_DIR } from './middlewares/upload'
 import { requireAuth, requireRole } from './auth'
+import { getActivePeriod } from './services/academicPeriod'
 
 const app = express()
 const PORT = Number(process.env.PORT) || 3000
@@ -34,9 +34,6 @@ app.disable('x-powered-by')
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true, limit: '10mb' }))
 app.use(cookieParser())
-
-// Serve static uploaded files (e.g. proof of illness/permission)
-app.use('/uploads', express.static(UPLOADS_DIR))
 
 // 2. Rate Limiter for Login Endpoint (Prevents brute-force & credential stuffing)
 const authLimiter = rateLimit({
@@ -79,7 +76,7 @@ app.use('/api/admin', adminRouter)
 app.use('/api/agenda', agendaRouter)
 
 // Teacher module routing (Apply RBAC directly to Teacher Module Router)
-app.use('/api/teacher', requireAuth, requireRole('teacher', 'homeroom'), teacherRouter)
+app.use('/api/teacher', requireAuth, requireRole('teacher'), teacherRouter)
 
 // Checking if express running
 app.get('/api/health', (_req, res) => {
@@ -112,15 +109,68 @@ app.get('/api/health/database', async (_req, res) => {
 app.get(
   '/api/students',
   requireAuth,
-  requireRole('teacher', 'homeroom', 'staff', 'admin'),
-  async (_req, res) => {
+  requireRole('teacher', 'staff', 'admin'),
+  async (req, res) => {
     try {
+      const isTeacher = req.user!.role === 'teacher'
+      let periodId: bigint | undefined
+      let classId: bigint | undefined
+
+      if (isTeacher) {
+        const period = await getActivePeriod()
+        if (!period) return res.json({ data: [] })
+        periodId = period.academic_period_id
+
+        const rawClassId = req.query.classId ?? req.query.class_id
+        if (rawClassId !== undefined) {
+          if (typeof rawClassId !== 'string' || !/^[1-9]\d*$/.test(rawClassId)) {
+            return res.status(400).json({ message: 'Invalid classId query parameter.' })
+          }
+
+          classId = BigInt(rawClassId)
+          const teacher = await prisma.teachers.findUnique({
+            where: { user_id: BigInt(req.user!.userId) },
+            select: { teacher_id: true },
+          })
+          if (!teacher) {
+            return res.status(403).json({ message: 'Teacher profile not found.' })
+          }
+          const assignment = await prisma.teaching_assignments.findFirst({
+            where: {
+              teacher_id: teacher.teacher_id,
+              class_id: classId,
+              academic_period_id: periodId,
+            },
+            select: { teaching_assignment_id: true },
+          })
+          if (!assignment) {
+            return res.status(403).json({ message: 'You are not assigned to this class in the active academic period.' })
+          }
+        }
+      }
+
       const students = await prisma.students.findMany({
+        where: periodId
+          ? {
+              student_enrollments: {
+                some: {
+                  academic_period_id: periodId,
+                  ...(classId ? { class_id: classId } : {}),
+                },
+              },
+            }
+          : undefined,
         select: {
           student_id: true,
           nis: true,
           name: true,
           student_enrollments: {
+            where: periodId
+              ? {
+                  academic_period_id: periodId,
+                  ...(classId ? { class_id: classId } : {}),
+                }
+              : undefined,
             select: {
               classes: { select: { name: true } },
               academic_periods: { select: { academic_year: true, semester: true } },

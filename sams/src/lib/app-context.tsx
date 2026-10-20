@@ -31,6 +31,8 @@ type AppState = {
   user: User | null
   isAuthenticated: boolean
   isLoading: boolean
+  isHomeroom: boolean
+  homeroomClassId: string | null
   // Legacy alias for compatibility
   isAuthed: boolean
   login: (credentials: LoginCredentials) => Promise<User>
@@ -56,6 +58,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [query, setQuery] = useState('')
   const [pending, setPending] = useState<PendingRequest[]>([])
   const [reviewed, setReviewed] = useState<ReviewedRequest[]>([])
+  const hasActiveHomeroomAssignment = user?.isHomeroom === true && role === 'teacher'
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', dark)
@@ -72,15 +75,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
           if (verifiedUser) {
             setUser(verifiedUser)
             setRole(verifiedUser.role)
+            if (!verifiedUser.isHomeroom) setPending([])
           } else {
             setUser(null)
+            setPending([])
           }
         }
       } catch {
         if (isMounted) {
-          // fallback to local stored user
           const stored = getStoredUser()
-          setUser(stored)
+          setUser(stored ? { ...stored, isHomeroom: false, homeroomClassId: null } : null)
           if (stored) setRole(stored.role)
         }
       } finally {
@@ -97,45 +101,41 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  // Sync real attendance data & homeroom pending requests
+  // Sync attendance requests for teachers with an active homeroom assignment.
   useEffect(() => {
     let isMounted = true
-    if (!user) return
+    if (!hasActiveHomeroomAssignment) return
 
-    // Homeroom and teacher accounts can review attendance requests.
-    if (role === 'homeroom' || role === 'teacher') {
-      getHomeroomRequests({ status: 'PENDING' })
-        .then((reqs) => {
-          if (!isMounted) return
-          const mapped: PendingRequest[] = reqs.map((r) => {
-            const dateObj = new Date(r.date)
-            const dateFormatted = isNaN(dateObj.getTime())
-              ? r.date
-              : dateObj.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })
-            const statusMapped = r.attendance_status === 'SICK' ? 'sakit' : 'izin'
+    getHomeroomRequests({ status: 'PENDING' })
+      .then((reqs) => {
+        if (!isMounted) return
+        const mapped: PendingRequest[] = reqs.map((r) => {
+          const dateObj = new Date(r.date)
+          const dateFormatted = isNaN(dateObj.getTime())
+            ? r.date
+            : dateObj.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })
+          const statusMapped = r.attendance_status === 'SICK' ? 'sakit' : 'izin'
 
-            return {
-              id: r.id || r.record_id,
-              student: r.student?.name || 'Unknown Student',
-              nis: r.student?.nis || '-',
-              status: statusMapped,
-              date: dateFormatted,
-              note: r.note || '',
-              evidence: r.document_url || '',
-            }
-          })
-          setPending(mapped)
+          return {
+            id: r.id || r.record_id,
+            student: r.student?.name || 'Unknown Student',
+            nis: r.student?.nis || '-',
+            status: statusMapped,
+            date: dateFormatted,
+            note: r.note || '',
+            evidence: r.document_url || '',
+          }
         })
-        .catch(() => {
-          // If homeroom query fails (e.g. teacher with no homeroom assignment), clear pending
-          if (isMounted) setPending([])
-        })
-    }
+        setPending(mapped)
+      })
+      .catch(() => {
+        if (isMounted) setPending([])
+      })
 
     return () => {
       isMounted = false
     }
-  }, [user, role])
+  }, [hasActiveHomeroomAssignment, user?.id])
 
   async function checkAuthStatus() {
     setIsLoading(true)
@@ -144,6 +144,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setUser(verifiedUser)
       if (verifiedUser) {
         setRole(verifiedUser.role)
+        setPending([])
+      } else {
+        setRole('student')
+        setPending([])
       }
     } finally {
       setIsLoading(false)
@@ -157,6 +161,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       saveSession(result.token, result.user)
       setUser(result.user)
       setRole(result.user.role)
+      setPending([])
       return result.user
     } finally {
       setIsLoading(false)
@@ -169,6 +174,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await apiLogout()
       setUser(null)
       setRole('student')
+      setPending([])
     } finally {
       setIsLoading(false)
     }
@@ -178,6 +184,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   function signIn(u: User) {
     setUser(u)
     setRole(u.role)
+    setPending([])
   }
 
   function signOut() {
@@ -211,6 +218,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         user,
         isAuthenticated,
         isLoading,
+        isHomeroom: user?.isHomeroom ?? false,
+        homeroomClassId: user?.homeroomClassId ?? null,
         isAuthed: isAuthenticated,
         login,
         logout,

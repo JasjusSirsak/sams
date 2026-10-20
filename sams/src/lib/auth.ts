@@ -14,6 +14,8 @@ export interface User {
   name: string
   role: Role
   className?: string | null
+  isHomeroom?: boolean
+  homeroomClassId?: string | null
 }
 
 // Compatibility alias if any component references AuthUser
@@ -26,6 +28,8 @@ export interface AuthResponse {
     name: string
     role: string
     class_name?: string | null
+    isHomeroom: boolean
+    homeroomClassId: string | null
   }
 }
 
@@ -43,11 +47,11 @@ const ROLE_MAP: Record<string, Role> = {
   student: 'student',
   parent: 'parent',
   teacher: 'teacher',
-  homeroom: 'homeroom',
+  homeroom: 'teacher',
   admin: 'admin',
   staff: 'staff',
-  wali: 'homeroom',
-  'wali kelas': 'homeroom',
+  wali: 'teacher',
+  'wali kelas': 'teacher',
 }
 
 export function toRole(raw: string): Role {
@@ -61,6 +65,8 @@ export function normalizeUser(raw: AuthResponse['user']): User {
     name: raw.name,
     role: toRole(raw.role),
     className: raw.class_name ?? null,
+    isHomeroom: raw.isHomeroom === true,
+    homeroomClassId: raw.homeroomClassId ?? null,
   }
 }
 
@@ -79,7 +85,14 @@ export function getStoredUser(): User | null {
   if (typeof window === 'undefined') return null
   try {
     const raw = localStorage.getItem(USER_KEY)
-    return raw ? (JSON.parse(raw) as User) : null
+    if (!raw) return null
+    const stored = JSON.parse(raw) as Omit<User, 'role'> & { role: string }
+    return {
+      ...stored,
+      role: toRole(stored.role),
+      isHomeroom: stored.isHomeroom === true,
+      homeroomClassId: stored.homeroomClassId ?? null,
+    }
   } catch {
     return null
   }
@@ -140,10 +153,9 @@ export async function checkSession(): Promise<User | null> {
     saveSession(token, user)
     return user
   } catch {
-    // If backend returns 401 or network failure during auth,
-    // fallback to local stored user if server is offline/mocking
+    // A cached assignment must never grant homeroom-only UI access.
     const fallbackUser = getStoredUser()
-    return fallbackUser
+    return fallbackUser ? { ...fallbackUser, isHomeroom: false, homeroomClassId: null } : null
   }
 }
 

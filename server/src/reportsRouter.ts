@@ -25,7 +25,7 @@ function safeFilenamePart(value: string): string {
 reportsRouter.get(
   '/attendance',
   requireAuth,
-  requireRole('teacher', 'homeroom', 'staff', 'admin'),
+  requireRole('teacher', 'staff', 'admin'),
   async (req: Request, res: Response) => {
     const { classId, startDate: rawStartDate, endDate: rawEndDate, format } = req.query
 
@@ -89,7 +89,7 @@ reportsRouter.get(
 reportsRouter.get(
   '/attendance/:classId',
   requireAuth,
-  requireRole('teacher', 'homeroom', 'staff', 'admin'),
+  requireRole('teacher', 'staff', 'admin'),
   async (req: Request, res: Response) => {
     const { classId: rawClassId } = req.params
     if (typeof rawClassId !== 'string' || !/^[1-9]\d*$/.test(rawClassId)) {

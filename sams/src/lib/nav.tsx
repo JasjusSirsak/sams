@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, type MouseEvent, type R
 
 type NavState = {
   pathname: string
+  search: string
   push: (to: string) => void
   replace: (to: string) => void
 }
@@ -10,24 +11,29 @@ const NavContext = createContext<NavState | null>(null)
 
 export function NavProvider({ children }: { children: ReactNode }) {
   const [pathname, setPathname] = useState(() => window.location.pathname || '/')
+  const [search, setSearch] = useState(() => window.location.search)
+
+  function syncLocation() {
+    setPathname(window.location.pathname || '/')
+    setSearch(window.location.search)
+  }
 
   useEffect(() => {
-    const onPop = () => setPathname(window.location.pathname || '/')
-    window.addEventListener('popstate', onPop)
-    return () => window.removeEventListener('popstate', onPop)
+    window.addEventListener('popstate', syncLocation)
+    return () => window.removeEventListener('popstate', syncLocation)
   }, [])
 
   function push(to: string) {
     window.history.pushState({}, '', to)
-    setPathname(to)
+    syncLocation()
   }
 
   function replace(to: string) {
     window.history.replaceState({}, '', to)
-    setPathname(to)
+    syncLocation()
   }
 
-  return <NavContext.Provider value={{ pathname, push, replace }}>{children}</NavContext.Provider>
+  return <NavContext.Provider value={{ pathname, search, push, replace }}>{children}</NavContext.Provider>
 }
 
 function useNav() {
@@ -38,6 +44,10 @@ function useNav() {
 
 export function usePathname() {
   return useNav().pathname
+}
+
+export function useSearchParams() {
+  return new URLSearchParams(useNav().search)
 }
 
 export function useRouter() {

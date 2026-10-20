@@ -1,4 +1,5 @@
 import prisma from '../db'
+import { getActivePeriod } from './academicPeriod'
 
 type ServiceResult<T = unknown> = {
   statusCode: number
@@ -56,12 +57,26 @@ export async function saveGrades(body: Record<string, unknown>, user: SessionUse
   const resolvedAssignmentId = parseBigIntSafe(body.teaching_assignment_id ?? body.teachingAssignmentId)
   const resolvedClassId = parseBigIntSafe(body.class_id ?? body.classId)
   const resolvedSubjectId = parseBigIntSafe(body.subject_id ?? body.subjectId)
-  const resolvedPeriodId = parseBigIntSafe(body.academic_period_id ?? body.academicPeriodId)
+  const period = await getActivePeriod()
+  if (!period) return result(400, { message: 'No active academic period.' })
+
+  const teacher = role === 'teacher' ? await getTeacherProfileByUserId(user.userId) : null
+  if (role === 'teacher' && !teacher) {
+    return result(403, { message: 'Forbidden. Teacher profile not found for authenticated account.' })
+  }
+
+  const assignmentWhere = {
+    academic_period_id: period.academic_period_id,
+    ...(teacher ? { teacher_id: teacher.teacher_id } : {}),
+  }
   let targetAssignment = null
 
   if (resolvedAssignmentId) {
-    targetAssignment = await prisma.teaching_assignments.findUnique({
-      where: { teaching_assignment_id: resolvedAssignmentId },
+    targetAssignment = await prisma.teaching_assignments.findFirst({
+      where: {
+        teaching_assignment_id: resolvedAssignmentId,
+        ...assignmentWhere,
+      },
       include: {
         classes: { select: { name: true } },
         subjects: { select: { name: true, code: true } },
@@ -72,13 +87,12 @@ export async function saveGrades(body: Record<string, unknown>, user: SessionUse
       where: {
         class_id: resolvedClassId,
         subject_id: resolvedSubjectId,
-        ...(resolvedPeriodId ? { academic_period_id: resolvedPeriodId } : {}),
+        ...assignmentWhere,
       },
       include: {
         classes: { select: { name: true } },
         subjects: { select: { name: true, code: true } },
       },
-      orderBy: { academic_period_id: 'desc' },
     })
   }
 
@@ -86,17 +100,6 @@ export async function saveGrades(body: Record<string, unknown>, user: SessionUse
     return result(404, {
       message: 'Teaching assignment not found. Please provide a valid teaching_assignment_id or (class_id and subject_id).',
     })
-  }
-
-  if (role === 'teacher' || role === 'homeroom') {
-    const teacher = await getTeacherProfileByUserId(user.userId)
-    if (!teacher || teacher.teacher_id !== targetAssignment.teacher_id) {
-      return result(403, {
-        message: teacher
-          ? `Forbidden. You do not have permission to grade for class "${targetAssignment.classes.name}" and subject "${targetAssignment.subjects.name}". You are not assigned to this class and subject.`
-          : 'Forbidden. Teacher profile not found for authenticated account.',
-      })
-    }
   }
 
   const rawGradeList: RawGradeItem[] = Array.isArray(body.grades)
@@ -167,6 +170,7 @@ export async function saveGrades(body: Record<string, unknown>, user: SessionUse
     where: {
       class_id: targetAssignment.class_id,
       student_id: { in: uniqueStudentIds },
+      academic_period_id: period.academic_period_id,
     },
     select: {
       student_id: true,
@@ -246,8 +250,22 @@ export async function getGradesByClassAndSubject(
     return result(400, { message: 'Invalid classId or subjectId in URL parameters.' })
   }
 
+  const period = await getActivePeriod()
+  if (!period) return result(404, { message: 'No active academic period.' })
+
+  const role = user.role.toLowerCase()
+  const teacher = role === 'teacher' ? await getTeacherProfileByUserId(user.userId) : null
+  if (role === 'teacher' && !teacher) {
+    return result(403, { message: 'Forbidden. Teacher profile not found for authenticated account.' })
+  }
+
   const assignments = await prisma.teaching_assignments.findMany({
-    where: { class_id: classId, subject_id: subjectId },
+    where: {
+      class_id: classId,
+      subject_id: subjectId,
+      academic_period_id: period.academic_period_id,
+      ...(teacher ? { teacher_id: teacher.teacher_id } : {}),
+    },
     include: {
       classes: { select: { class_id: true, name: true, grade_level: true } },
       subjects: { select: { subject_id: true, name: true, code: true } },
@@ -258,20 +276,9 @@ export async function getGradesByClassAndSubject(
     return result(404, { message: 'No teaching assignment found for the specified class and subject.' })
   }
 
-  const role = user.role.toLowerCase()
-  if (role === 'teacher' || role === 'homeroom') {
-    const teacher = await getTeacherProfileByUserId(user.userId)
-    if (!teacher) return result(403, { message: 'Forbidden. Teacher profile not found for authenticated account.' })
-    if (!assignments.some((assignment) => assignment.teacher_id === teacher.teacher_id)) {
-      return result(403, {
-        message: `Forbidden. You do not have permission to view grades for class "${assignments[0].classes.name}" and subject "${assignments[0].subjects.name}". You are not assigned to this class and subject.`,
-      })
-    }
-  }
-
   const assignmentIds = assignments.map((assignment) => assignment.teaching_assignment_id)
   const enrolledStudents = await prisma.student_enrollments.findMany({
-    where: { class_id: classId },
+    where: { class_id: classId, academic_period_id: period.academic_period_id },
     include: {
       students: { select: { student_id: true, nis: true, name: true } },
     },

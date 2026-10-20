@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { BookOpen, ClipboardCheck, ListChecks, Users } from 'lucide-react'
+import { BookOpen, Users } from 'lucide-react'
 import { useApp } from '@/lib/app-context'
 import { TEACHER_CLASSES, USERS } from '@/lib/data'
 import { getTeacherDashboardSummary, type TeacherDashboardSummary } from '@/lib/api'
+import { Link } from '@/lib/nav'
 import { AgendaWidget } from '@/components/agenda/agenda-widget'
 import { ApprovalList } from '@/components/attendance/approval-list'
 import { AttendanceRecap } from '@/components/attendance/attendance-recap'
@@ -12,10 +13,9 @@ import { GradeSummary } from '@/components/grades/grade-summary'
 import { ParentAttendance } from './parent-attendance'
 import { ParentGrades } from './parent-grades'
 import { MyClasses } from '@/components/grades/my-classes'
-import { StatCard } from '@/components/ui-kit'
+import { Card, CardLabel, EmptyState, StatCard } from '@/components/ui-kit'
 import { ChildSelector } from './child-selector'
 import { Hero } from './hero'
-import { ReportCard } from './report-card'
 
 export function StudentDashboard() {
   const { user: authUser } = useApp()
@@ -70,6 +70,7 @@ export function TeacherDashboard() {
   const [summary, setSummary] = useState<TeacherDashboardSummary | null>(null)
   const [isLoading, setIsLoading] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
+  const [classesExpanded, setClassesExpanded] = useState(false)
 
   // Only query the private teacher endpoint if user is authenticated and effective role is teacher
   const isRealTeacher = isAuthenticated && authUser?.role === 'teacher' && role === 'teacher'
@@ -78,15 +79,8 @@ export function TeacherDashboard() {
     let isMounted = true
 
     if (!isRealTeacher) {
-      // In preview/mock mode or unauthenticated, do not call private teacher API
-      setIsLoading(false)
-      setSummary(null)
-      setError(null)
       return
     }
-
-    setIsLoading(true)
-    setError(null)
 
     getTeacherDashboardSummary()
       .then((data) => {
@@ -111,24 +105,23 @@ export function TeacherDashboard() {
   let subtitle = 'Subject Teacher · Mathematics'
   if (isRealTeacher) {
     if (isLoading) {
-      subtitle = 'Subject Teacher · Loading subjects...'
-    } else if (summary && summary.subjects.length > 0) {
-      subtitle = `Subject Teacher · ${summary.subjects.join(', ')}`
-    } else if (summary && summary.subjects.length === 0) {
-      subtitle = 'Subject Teacher · No subjects assigned'
+      subtitle = 'Teacher · Loading dashboard...'
+    } else if (summary?.active_period) {
+      subtitle = `Teacher · ${summary.active_period.year} · Semester ${summary.active_period.semester}`
     } else if (error) {
-      subtitle = 'Subject Teacher · Unavailable'
+      subtitle = 'Teacher · Unavailable'
+    } else {
+      subtitle = 'Teacher'
     }
   }
 
-  // Determine card values
   const classesValue = !isRealTeacher
     ? String(TEACHER_CLASSES.length)
     : isLoading
       ? '...'
       : error
         ? 'Error'
-        : String(summary?.classes_taught ?? 0)
+        : String(summary?.classes_taught_count ?? 0)
 
   const classesHint = !isRealTeacher
     ? 'This semester'
@@ -137,8 +130,8 @@ export function TeacherDashboard() {
       : error
         ? 'Failed to load'
         : summary?.active_period
-          ? `${summary.active_period.academic_year} · Semester ${summary.active_period.semester}`
-          : 'No active period'
+          ? `${summary.active_period.year} · Semester ${summary.active_period.semester}`
+          : 'No active academic period'
 
   const totalStudentsValue = !isRealTeacher
     ? String(TEACHER_CLASSES.reduce((s, c) => s + c.students, 0))
@@ -156,68 +149,109 @@ export function TeacherDashboard() {
         ? 'Failed to load'
         : 'Across taught classes'
 
-  const attendanceValue = !isRealTeacher
-    ? '94%'
-    : isLoading
-      ? '...'
-      : error
-        ? 'Error'
-        : `${summary?.attendance_today?.rate ?? 0}%`
-
-  const attendanceHint = !isRealTeacher
-    ? 'XI IPA 2 · 31 of 32'
-    : isLoading
-      ? 'Calculating attendance...'
-      : error
-        ? 'Failed to load'
-        : summary?.attendance_today?.hint || 'No sessions today'
+  const classes = isRealTeacher
+    ? summary?.classes ?? []
+    : TEACHER_CLASSES.map((item) => ({
+        class_id: item.id,
+        name: item.name,
+        student_count: item.students,
+      }))
+  const attendance = summary?.attendance_today
+  const attendanceCounts = attendance
+    ? [
+        ['Present', attendance.present],
+        ['Sick', attendance.sick],
+        ['Permitted', attendance.permitted],
+        ['Absent', attendance.absent],
+        ['Pending', attendance.pending],
+        ['Not recorded', attendance.not_recorded],
+      ]
+    : []
+  const showApprovals = isRealTeacher && summary?.is_homeroom === true
 
   return (
     <>
       <Hero name={name} subtitle={subtitle} />
       <div className="mb-6 grid gap-4 sm:grid-cols-3">
-        <StatCard label="Classes taught" value={classesValue} hint={classesHint} icon={BookOpen} />
-        <StatCard label="Total students" value={totalStudentsValue} hint={totalStudentsHint} icon={Users} />
-        <StatCard label="Attendance today" value={attendanceValue} hint={attendanceHint} icon={ClipboardCheck} />
+        <Card className="p-0">
+          <button
+            type="button"
+            className="flex w-full items-start gap-4 p-5 text-left"
+            aria-expanded={classesExpanded}
+            onClick={() => setClassesExpanded((expanded) => !expanded)}
+          >
+            <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary">
+              <BookOpen className="size-5" aria-hidden="true" />
+            </span>
+            <span className="min-w-0">
+              <span className="block text-sm text-muted">Classes taught</span>
+              <span className="block text-2xl font-bold text-ink">{classesValue}</span>
+              <span className="mt-0.5 block text-xs text-muted">{classesHint}</span>
+            </span>
+          </button>
+          {classesExpanded && (
+            <ul className="mt-4 space-y-2 border-t border-line pt-3">
+              {classes.map((item) => (
+                <li key={item.class_id}>
+                  <Link
+                    href={`/students?classId=${encodeURIComponent(item.class_id)}`}
+                    className="flex items-center justify-between gap-3 rounded-lg px-2 py-2 text-sm text-primary hover:bg-primary-soft"
+                  >
+                    <span>{item.name}</span>
+                    <span className="text-xs text-muted">{item.student_count} students</span>
+                  </Link>
+                </li>
+              ))}
+              {classes.length === 0 && (
+                <li className="px-2 py-2 text-sm text-muted">No classes assigned.</li>
+              )}
+            </ul>
+          )}
+        </Card>
+        <Link href="/students" className="block rounded-2xl focus-visible:outline-2 focus-visible:outline-primary">
+          <StatCard label="Total students" value={totalStudentsValue} hint={totalStudentsHint} icon={Users} />
+        </Link>
+        <Link href="/attendance" className="block rounded-2xl focus-visible:outline-2 focus-visible:outline-primary">
+          <Card>
+            <CardLabel>Attendance today</CardLabel>
+            {isLoading ? (
+              <p className="text-sm text-muted">Loading attendance...</p>
+            ) : error ? (
+              <p className="text-sm text-danger">Failed to load attendance.</p>
+            ) : !attendance ? (
+              <p className="text-sm text-muted">No attendance recorded yet today</p>
+            ) : (
+              <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                {attendanceCounts.map(([label, value]) => (
+                  <div key={label} className="flex justify-between gap-2">
+                    <dt className="text-muted">{label}</dt>
+                    <dd className="font-semibold text-ink">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+          </Card>
+        </Link>
       </div>
+      {isRealTeacher && !isLoading && !error && summary?.active_period === null && (
+        <div className="mb-6">
+          <EmptyState
+            title="No active academic period"
+            text="Dashboard class and attendance data will appear when an academic period is active."
+          />
+        </div>
+      )}
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
           <MyClasses />
-          <WeeklyChart />
+          {showApprovals && (
+            <>
+              <ApprovalList limit={2} />
+              <WeeklyChart />
+            </>
+          )}
         </div>
         <AgendaWidget className="h-fit" />
-      </div>
-    </>
-  )
-}
-
-
-
-export function HomeroomDashboard() {
-  const { pending, user: authUser } = useApp()
-  const mockUser = USERS.homeroom
-  const name = authUser?.name || mockUser.name
-  const subtitle = authUser?.className
-    ? `Homeroom Teacher · Class ${authUser.className}`
-    : `Homeroom Teacher · ${mockUser.subtitle}`
-
-  return (
-    <>
-      <Hero name={name} subtitle={subtitle} />
-      <div className="mb-6 grid gap-4 sm:grid-cols-3">
-        <StatCard label="Students" value="32" hint="XI IPA 2" icon={Users} />
-        <StatCard label="Present today" value="29" hint="2 sick · 1 permission" icon={ClipboardCheck} />
-        <StatCard label="Pending approvals" value={String(pending.length)} hint="Need your review" icon={ListChecks} />
-      </div>
-      <div className="grid gap-6 lg:grid-cols-3">
-        <div className="space-y-6 lg:col-span-2">
-          <ApprovalList limit={2} />
-          <WeeklyChart />
-        </div>
-        <div className="space-y-6">
-          <ReportCard />
-          <AgendaWidget />
-        </div>
       </div>
     </>
   )

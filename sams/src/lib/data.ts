@@ -1,6 +1,6 @@
 // All mock data lives here. Replace these with real API calls later (see lib/api.ts).
 
-export type Role = 'student' | 'parent' | 'teacher' | 'homeroom' | 'admin' | 'staff'
+export type Role = 'student' | 'parent' | 'teacher' | 'admin' | 'staff'
 export type AttendanceStatus = 'hadir' | 'izin' | 'sakit' | 'alfa'
 export type Approval = 'approved' | 'pending' | 'rejected'
 export type AgendaCategory = 'school' | 'academic' | 'assignment' | 'meeting' | 'exam'
@@ -11,7 +11,6 @@ export const USERS: Record<Role, { name: string; initials: string; subtitle: str
   student: { name: 'Raka Pratama', initials: 'RP', subtitle: 'Class XI IPA 2', roleLabel: 'Student' },
   parent: { name: 'Sri Wahyuni', initials: 'SW', subtitle: 'Parent of 2', roleLabel: 'Parent' },
   teacher: { name: 'Budi Santoso', initials: 'BS', subtitle: 'Mathematics', roleLabel: 'Teacher' },
-  homeroom: { name: 'Ratna Dewi', initials: 'RD', subtitle: 'Homeroom · XI IPA 2', roleLabel: 'Homeroom' },
   admin: { name: 'Administrator', initials: 'AD', subtitle: 'Manage school data', roleLabel: 'Admin' },
   staff: { name: 'School Staff', initials: 'SS', subtitle: 'Manage school data', roleLabel: 'Staff' },
 }
@@ -162,7 +161,6 @@ export const NOTIFICATIONS: Record<Role, string[]> = {
   student: ['Mathematics quiz today at 08:00', 'Physics grade updated: 91', 'Chemistry assignment due tomorrow'],
   parent: ["Nadia's sick request is pending approval", 'Parent–teacher meeting on Fri, 9 Oct', "Raka's Physics grade updated"],
   teacher: ['XI IPA 2 final exam scores are incomplete', 'Midterm exam week begins Mon, 12 Oct'],
-  homeroom: ['3 attendance requests waiting for review', 'Semester recap can be generated'],
   admin: ['Review school master data'],
   staff: ['Review school master data'],
 }

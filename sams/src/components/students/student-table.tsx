@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { useApp } from '@/lib/app-context'
-import { getStudents, type Student } from '@/lib/api'
+import { getStudents, getTeacherDashboardSummary, type Student } from '@/lib/api'
 import { cn } from '@/lib/helpers'
 import { Avatar, Card, EmptyState, Pill, Spinner, buttonSecondary, inputClass } from '@/components/ui-kit'
 
@@ -20,11 +20,22 @@ type StudentItem = Student & {
   attendance?: number | null
 }
 
-export function StudentTable({ showRateOnly = false }: { showRateOnly?: boolean }) {
+export function StudentTable({
+  showRateOnly = false,
+  classId = null,
+}: {
+  showRateOnly?: boolean
+  classId?: string | null
+}) {
   const { query, setQuery } = useApp()
   const [students, setStudents] = useState<StudentItem[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [resolvedClass, setResolvedClass] = useState<{
+    classId: string
+    className: string | null
+    error: string | null
+  } | null>(null)
   const [gender, setGender] = useState('all')
   const [page, setPage] = useState(0)
 
@@ -64,6 +75,39 @@ export function StudentTable({ showRateOnly = false }: { showRateOnly?: boolean 
     }
   }, [])
 
+  useEffect(() => {
+    if (!classId) return
+
+    let isMounted = true
+    getTeacherDashboardSummary()
+      .then((summary) => {
+        if (!isMounted) return
+        const selectedClass = summary.classes.find((item) => item.class_id === classId)
+        setResolvedClass({
+          classId,
+          className: selectedClass?.name ?? null,
+          error: null,
+        })
+      })
+      .catch((classError: unknown) => {
+        if (isMounted) {
+          setResolvedClass({
+            classId,
+            className: null,
+            error: classError instanceof Error ? classError.message : 'Failed to load class details.',
+          })
+        }
+      })
+
+    return () => {
+      isMounted = false
+    }
+  }, [classId])
+
+  const isClassFilterLoading = Boolean(classId && resolvedClass?.classId !== classId)
+  const classFilterError =
+    classId && resolvedClass?.classId === classId ? resolvedClass.error : null
+
   const q = query.trim().toLowerCase()
   const filtered = students.filter((s) => {
     const nameMatch = !q || (s.name ? s.name.toLowerCase().includes(q) : false)
@@ -72,16 +116,24 @@ export function StudentTable({ showRateOnly = false }: { showRateOnly?: boolean 
 
     // Safely check gender filter without misrepresenting missing data
     const genderMatch = gender === 'all' || (Boolean(s.gender) && s.gender === gender)
+    const classMatch = !classId
+      ? true
+      : resolvedClass?.classId === classId &&
+        resolvedClass.className !== null &&
+        s.enrollments.some((enrollment) => enrollment.class_name === resolvedClass.className)
 
-    return searchMatch && genderMatch
+    return searchMatch && genderMatch && classMatch
   })
 
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
   const current = Math.min(page, pages - 1)
   const rows = filtered.slice(current * PAGE_SIZE, current * PAGE_SIZE + PAGE_SIZE)
 
-  const emptyText =
-    gender !== 'all' && students.length > 0 && students.every((s) => !s.gender)
+  const emptyText = classId && !isClassFilterLoading && !classFilterError && !resolvedClass?.className
+    ? 'This class is not assigned to your active teaching period.'
+    : classId && resolvedClass?.className
+      ? `No students are enrolled in ${resolvedClass.className}.`
+      : gender !== 'all' && students.length > 0 && students.every((s) => !s.gender)
       ? 'Gender data is not available in the database yet.'
       : 'Try a different name, NIS, or filter.'
 
@@ -123,15 +175,15 @@ export function StudentTable({ showRateOnly = false }: { showRateOnly?: boolean 
         )}
       </div>
 
-      {isLoading ? (
+      {isLoading || isClassFilterLoading ? (
         <div className="flex flex-col items-center justify-center py-12 text-muted">
           <Spinner />
           <p className="mt-2 text-sm">Loading students...</p>
         </div>
-      ) : error ? (
+      ) : error || classFilterError ? (
         <EmptyState
           title="Failed to load students"
-          text={error}
+          text={error || classFilterError || 'Failed to load students.'}
           action={
             <button type="button" onClick={handleRetry} className={buttonSecondary}>
               Try again

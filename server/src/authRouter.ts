@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express'
 import argon2 from 'argon2'
 import prisma from './db'
 import { generateSessionToken, setAuthCookie, clearAuthCookie, requireAuth } from './auth'
+import { getActivePeriod } from './services/academicPeriod'
 
 const authRouter = Router()
 
@@ -13,11 +14,7 @@ async function buildUserProfile(user: {
   username: string
   role_id: bigint
   roles: { name: string }
-  teachers: {
-    teacher_id: bigint
-    name: string
-    homeroom_assignments?: { classes: { name: string } }[]
-  } | null
+  teachers: { teacher_id: bigint; name: string } | null
   students: {
     student_id: bigint
     name: string
@@ -37,23 +34,10 @@ async function buildUserProfile(user: {
   let displayName = user.username
   let className: string | null = null
 
-  if (rawRole === 'teacher' || rawRole === 'guru') {
+  if (rawRole === 'teacher' || rawRole === 'guru' || rawRole === 'homeroom' || rawRole === 'wali' || rawRole === 'wali kelas') {
     mappedRole = 'teacher'
     if (user.teachers) {
       displayName = user.teachers.name
-      // Check if this teacher is an active homeroom teacher
-      if (user.teachers.homeroom_assignments && user.teachers.homeroom_assignments.length > 0) {
-        mappedRole = 'homeroom'
-        className = user.teachers.homeroom_assignments[0]?.classes?.name ?? null
-      }
-    }
-  } else if (rawRole === 'homeroom' || rawRole === 'wali' || rawRole === 'wali kelas') {
-    mappedRole = 'homeroom'
-    if (user.teachers) {
-      displayName = user.teachers.name
-      if (user.teachers.homeroom_assignments && user.teachers.homeroom_assignments.length > 0) {
-        className = user.teachers.homeroom_assignments[0]?.classes?.name ?? null
-      }
     }
   } else if (rawRole === 'student' || rawRole === 'siswa') {
     mappedRole = 'student'
@@ -77,6 +61,36 @@ async function buildUserProfile(user: {
     name: displayName,
     role: mappedRole,
     class_name: className,
+  }
+}
+
+async function getActiveHomeroomAssignment(userId: bigint) {
+  const period = await getActivePeriod()
+  if (!period) return null
+
+  return prisma.homeroom_assignments.findFirst({
+    where: {
+      teachers: { user_id: userId },
+      academic_period_id: period.academic_period_id,
+    },
+    orderBy: { academic_periods: { start_date: 'desc' } },
+    select: {
+      class_id: true,
+      classes: { select: { name: true } },
+    },
+  })
+}
+
+async function buildAuthenticatedProfile(user: Parameters<typeof buildUserProfile>[0]) {
+  const profile = await buildUserProfile(user)
+  const assignment =
+    profile.role === 'teacher' ? await getActiveHomeroomAssignment(user.user_id) : null
+
+  return {
+    ...profile,
+    class_name: assignment?.classes.name ?? profile.class_name,
+    isHomeroom: assignment !== null,
+    homeroomClassId: assignment?.class_id.toString() ?? null,
   }
 }
 
@@ -108,13 +122,7 @@ authRouter.post('/login', async (req: Request, res: Response) => {
       include: {
         roles: true,
         teachers: {
-          include: {
-            homeroom_assignments: {
-              include: {
-                classes: true,
-              },
-            },
-          },
+          select: { teacher_id: true, name: true },
         },
         students: {
           include: {
@@ -156,7 +164,7 @@ try {
 }
 
     // Prepare user profile
-    const profile = await buildUserProfile(user)
+    const profile = await buildAuthenticatedProfile(user)
 
     // Generate JWT token
     const token = generateSessionToken({
@@ -202,13 +210,7 @@ authRouter.get('/me', requireAuth, async (req: Request, res: Response) => {
       include: {
         roles: true,
         teachers: {
-          include: {
-            homeroom_assignments: {
-              include: {
-                classes: true,
-              },
-            },
-          },
+          select: { teacher_id: true, name: true },
         },
         students: {
           include: {
@@ -234,7 +236,7 @@ authRouter.get('/me', requireAuth, async (req: Request, res: Response) => {
       return res.status(403).json({ message: 'Account has been deactivated.' })
     }
 
-    const profile = await buildUserProfile(user)
+    const profile = await buildAuthenticatedProfile(user)
 
     return res.status(200).json({
       user: profile,

@@ -50,12 +50,12 @@ export function cn(...classes: (string | false | null | undefined)[]) {
 
 // Which pages each role may open. UX only — the backend must still authorize.
 export const ACCESS: Record<string, Role[]> = {
-  '/': ['student', 'parent', 'teacher', 'homeroom', 'admin', 'staff'],
-  '/approvals': ['homeroom'],
-  '/attendance': ['student', 'parent', 'teacher', 'homeroom'],
-  '/grades': ['student', 'parent', 'teacher', 'homeroom'],
-  '/students': ['teacher', 'homeroom'],
-  '/agenda': ['student', 'parent', 'teacher', 'homeroom'],
+  '/': ['student', 'parent', 'teacher', 'admin', 'staff'],
+  '/approvals': ['teacher'],
+  '/attendance': ['student', 'parent', 'teacher'],
+  '/grades': ['student', 'parent', 'teacher'],
+  '/students': ['teacher'],
+  '/agenda': ['student', 'parent', 'teacher'],
   '/admin/classes': ['admin', 'staff'],
   '/admin/subjects': ['admin', 'staff'],
   '/admin/academic-periods': ['admin', 'staff'],
@@ -63,7 +63,8 @@ export const ACCESS: Record<string, Role[]> = {
   '/admin/students': ['admin', 'staff'],
 }
 
-export const canAccess = (role: Role, href: string) => (ACCESS[href] ?? []).includes(role)
+export const canAccess = (role: Role, href: string, isHomeroom = false) =>
+  (ACCESS[href] ?? []).includes(role) && (href !== '/approvals' || isHomeroom)
 
 export function getInitials(name?: string | null): string {
   if (!name) return '?'

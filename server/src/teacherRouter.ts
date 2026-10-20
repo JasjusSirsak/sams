@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from 'express'
 import prisma from './db'
 import { requireAuth } from './auth'
+import { getActivePeriod, getJakartaDate } from './services/academicPeriod'
 
 const teacherRouter = Router()
 
@@ -13,37 +14,107 @@ async function getAuthenticatedTeacher(userId: string) {
   })
 }
 
+// dont frgo, down here is something about the teacherRouter from frontend
+
 // 1. Teacher Dashboard Summary Endpoint
 teacherRouter.get('/dashboard-summary', requireAuth, async (req: Request, res: Response) => {
   try {
-    const sessionUser = req.user!
-    const teacher = await getAuthenticatedTeacher(sessionUser.userId)
-
+    const teacher = await getAuthenticatedTeacher(req.user!.userId)
     if (!teacher) {
       return res.status(403).json({ message: 'Access denied. Teacher profile not found.' })
     }
 
-    // Count taught classes
-    const classesCount = await prisma.teaching_assignments.count({
-      where: { teacher_id: teacher.teacher_id },
+    const today = getJakartaDate()
+
+    const base = {
+      teacher_name: teacher.name,
+      employee_number: teacher.employee_number,
+    }
+
+    const period = await getActivePeriod()
+
+    if (!period) {
+      return res.json({
+        ...base,
+        active_period: null,
+        classes_taught_count: 0,
+        total_students: 0,
+        classes: [],
+        is_homeroom: false,
+        homeroom_class_id: null,
+        attendance_today: null,
+      })
+    }
+
+    const assignments = await prisma.teaching_assignments.findMany({
+      where: { teacher_id: teacher.teacher_id, academic_period_id: period.academic_period_id },
+      select: { class_id: true, classes: { select: { name: true } } },
     })
 
-    // Count total unique students taught by this teacher
-    const assignments = await prisma.teaching_assignments.findMany({
-      where: { teacher_id: teacher.teacher_id },
+    // Distinct classes (a teacher can teach several subjects in one class)
+    const classMap = new Map<string, { class_id: bigint; name: string }>()
+    for (const a of assignments) {
+      classMap.set(a.class_id.toString(), { class_id: a.class_id, name: a.classes.name })
+    }
+    const classIds = [...classMap.values()].map((c) => c.class_id)
+
+    // Students per class in the active period
+    const enrollmentCounts = classIds.length
+      ? await prisma.student_enrollments.groupBy({
+          by: ['class_id'],
+          where: { class_id: { in: classIds }, academic_period_id: period.academic_period_id },
+          _count: { _all: true },
+        })
+      : []
+    const countByClass = new Map(enrollmentCounts.map((e) => [e.class_id.toString(), e._count._all]))
+    const totalStudents = enrollmentCounts.reduce((sum, e) => sum + e._count._all, 0)
+
+    // Homeroom is a fact in data, not a role
+    const homeroom = await prisma.homeroom_assignments.findFirst({
+      where: { teacher_id: teacher.teacher_id, academic_period_id: period.academic_period_id },
       select: { class_id: true },
     })
-    const classIds = assignments.map((a) => a.class_id)
 
-    const studentsCount = await prisma.student_enrollments.count({
-      where: { class_id: { in: classIds } },
-    })
+    // Attendance today across the teacher's classes
+    let attendanceToday: null | Record<string, number> = null
+    if (classIds.length) {
+      const sessionCount = await prisma.attendance_sessions.count({
+        where: { class_id: { in: classIds }, attendance_date: today },
+      })
+      if (sessionCount > 0) {
+        const records = await prisma.attendance_records.findMany({
+          where: { attendance_sessions: { class_id: { in: classIds }, attendance_date: today } },
+          select: { status: true, approval_status: true },
+        })
+        let present = 0, sick = 0, permitted = 0, absent = 0, pending = 0
+        for (const r of records) {
+          if (r.approval_status === 'REJECTED') { absent++; continue }
+          if (r.approval_status === 'PENDING') pending++
+          if (r.status === 'PRESENT') present++
+          else if (r.status === 'SICK') sick++
+          else if (r.status === 'PERMITTED') permitted++
+          else absent++
+        }
+        attendanceToday = {
+          present, sick, permitted, absent, pending,
+          not_recorded: Math.max(totalStudents - records.length, 0),
+        }
+      }
+    }
 
     return res.json({
-      teacher_name: teacher.name,
-      employee_number: teacher.employee_number, // Adjusted
-      classes_taught_count: classesCount,
-      total_students: studentsCount,
+      ...base,
+      active_period: { id: period.academic_period_id.toString(), year: period.academic_year, semester: period.semester },
+      classes_taught_count: classMap.size,
+      total_students: totalStudents,
+      classes: [...classMap.values()].map((c) => ({
+        class_id: c.class_id.toString(),
+        name: c.name,
+        student_count: countByClass.get(c.class_id.toString()) ?? 0,
+      })),
+      is_homeroom: !!homeroom,
+      homeroom_class_id: homeroom ? homeroom.class_id.toString() : null,
+      attendance_today: attendanceToday, // null = no session yet today
     })
   } catch (error) {
     console.error('Failed to fetch dashboard summary:', error)
@@ -61,22 +132,31 @@ teacherRouter.get('/classes', requireAuth, async (req: Request, res: Response) =
       return res.status(403).json({ message: 'Access denied. Teacher profile not found.' })
     }
 
+    const period = await getActivePeriod()
+    if (!period) return res.json({ data: [] })
+
     const assignments = await prisma.teaching_assignments.findMany({
-      where: { teacher_id: teacher.teacher_id },
+      where: {
+        teacher_id: teacher.teacher_id,
+        academic_period_id: period.academic_period_id,
+      },
       include: {
         classes: {
           select: {
             class_id: true,
             name: true,
             grade_level: true,
-            student_enrollments: { select: { student_id: true } },
+            student_enrollments: {
+              where: { academic_period_id: period.academic_period_id },
+              select: { student_id: true },
+            },
           },
         },
         subjects: { select: { subject_id: true, name: true } },
+        grades: { select: { grade_id: true } },
         academic_periods: {
           select: { academic_period_id: true, academic_year: true, semester: true },
         },
-        grades: { select: { grade_id: true } },
       },
     })
 
@@ -134,9 +214,16 @@ teacherRouter.get('/agendas', requireAuth, async (req: Request, res: Response) =
       }
     }
 
+    const requestedDate = dateFilter.gte ?? new Date()
+    const period = await getActivePeriod(requestedDate)
+    if (!period) return res.json({ data: [] })
+
     // Fetch teaching journals / agenda based on teacher's teaching assignments
     const assignments = await prisma.teaching_assignments.findMany({
-      where: { teacher_id: teacher.teacher_id },
+      where: {
+        teacher_id: teacher.teacher_id,
+        academic_period_id: period.academic_period_id,
+      },
       // FIX: 'assignment_id' -> 'teaching_assignment_id'
       select: { teaching_assignment_id: true },
     })
@@ -188,21 +275,25 @@ teacherRouter.get('/attendance-weekly', requireAuth, async (req: Request, res: R
       return res.status(403).json({ message: 'Access denied. Teacher profile not found.' })
     }
 
-    // 1. Get class_ids taught by this teacher
-    const assignments = await prisma.teaching_assignments.findMany({
-      where: { teacher_id: teacher.teacher_id },
+    const today = new Date()
+    const attendanceDate = getJakartaDate(today)
+    const period = await getActivePeriod(today)
+    const assignment = period ? await prisma.homeroom_assignments.findFirst({
+      where: {
+        teacher_id: teacher.teacher_id,
+        academic_period_id: period.academic_period_id,
+      },
       select: { class_id: true },
-    })
-    const classIds = [...new Set(assignments.map((a) => a.class_id))] // unique
+    }) : null
 
-    if (classIds.length === 0) {
-      return res.json({
-        data: { class_name: 'No Classes', weekly: buildEmptyWeek() },
+    if (!assignment) {
+      return res.status(403).json({
+        message: 'You do not have an active homeroom assignment for today.',
       })
     }
+    const classIds = [assignment.class_id]
 
     // 2. Calculate current week range (Monday - Friday)
-    const today = new Date()
     const dayOfWeek = today.getDay() // 0=Sunday, 1=Monday, ...
     const monday = new Date(today)
     // Shift to Monday of current week

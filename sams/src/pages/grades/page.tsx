@@ -11,7 +11,7 @@ export default function GradesPage() {
   const { role } = useApp()
   const studentId = useActiveStudentId()
 
-  if (role === 'teacher' || role === 'homeroom') {
+  if (role === 'teacher') {
     return (
       <>
         <PageHeader title="Grade entry" subtitle="Enter daily, midterm and final scores. Final score is calculated automatically." />

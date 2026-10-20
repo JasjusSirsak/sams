@@ -3,7 +3,7 @@ import { AuthProvider, useApp } from './lib/app-context'
 import { NavProvider, usePathname, useRouter } from './lib/nav'
 import { AppShell } from './components/layout/app-shell'
 import { Forbidden, Spinner } from './components/ui-kit'
-import { HomeroomDashboard, ParentDashboard, StudentDashboard, TeacherDashboard } from './components/dashboard/dashboards'
+import { ParentDashboard, StudentDashboard, TeacherDashboard } from './components/dashboard/dashboards'
 import LoginPage from './pages/login/login'
 import AgendaPage from './pages/agenda/page'
 import ApprovalsPage from './pages/approvals/page'
@@ -84,13 +84,12 @@ function DashboardPage() {
   if (role === 'admin' || role === 'staff') return <AdminMasterDataPage />
   if (role === 'parent') return <ParentDashboard />
   if (role === 'teacher') return <TeacherDashboard />
-  if (role === 'homeroom') return <HomeroomDashboard />
   return <StudentDashboard />
 }
 
 function RouteAccessGuard({ path, children }: { path: string; children: ReactNode }) {
-  const { role } = useApp()
-  return canAccess(role, path) ? <>{children}</> : <Forbidden />
+  const { role, isHomeroom } = useApp()
+  return canAccess(role, path, isHomeroom) ? <>{children}</> : <Forbidden />
 }
 
 function AppRoutes() {

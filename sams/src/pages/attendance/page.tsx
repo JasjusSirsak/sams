@@ -4,27 +4,16 @@ import { useActiveStudentId, useApp } from '@/lib/app-context'
 import { AttendanceHistory } from '@/components/attendance/attendance-history'
 import { AttendanceRecap } from '@/components/attendance/attendance-recap'
 import { TodayAttendance } from '@/components/attendance/today-attendance'
-import { WeeklyChart } from '@/components/attendance/weekly-chart'
+import { TeacherClassAttendance } from '@/components/attendance/teacher-class-attendance'
 import { ChildSelector } from '@/components/dashboard/child-selector'
 import { ParentAttendance } from '@/components/dashboard/parent-attendance'
-import { StudentTable } from '@/components/students/student-table'
 import { PageHeader } from '@/components/ui-kit'
 
 export default function AttendancePage() {
   const { role } = useApp()
   const studentId = useActiveStudentId()
 
-  if (role === 'teacher' || role === 'homeroom') {
-    return (
-      <>
-        <PageHeader title="Attendance" subtitle="Class XI IPA 2 · Semester 1" />
-        <div className="space-y-6">
-          <WeeklyChart />
-          <StudentTable showRateOnly />
-        </div>
-      </>
-    )
-  }
+  if (role === 'teacher') return <TeacherClassAttendance />
 
   return (
     <>

@@ -1,4 +1,5 @@
 import prisma from '../db'
+import { getActivePeriod } from './academicPeriod'
 
 export type ServiceResult<T = unknown> = {
   statusCode: number
@@ -48,6 +49,10 @@ function parseDateString(value: unknown): Date | null {
   const date = new Date(value.trim())
   if (Number.isNaN(date.getTime())) return null
   return date
+}
+
+function getServerToday(now: Date): Date {
+  return new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()))
 }
 
 function isPrismaUniqueError(error: unknown): boolean {
@@ -127,10 +132,18 @@ export async function createOrGetAttendanceSession(
 
 export async function submitAttendanceRecord(
   body: Record<string, unknown>,
-  user: SessionUser
+  user: SessionUser,
+  evidencePath?: string
 ): Promise<ServiceResult> {
+  if (user.role.toLowerCase() === 'student') {
+    return submitStudentAttendanceRecord(body, user, evidencePath)
+  }
+
   const records = body.records
   if (Array.isArray(records)) {
+    if (evidencePath) {
+      return result(400, { message: 'Evidence uploads are not supported for bulk attendance submissions.' })
+    }
     const sessionId = parseBigIntSafe(body.session_id ?? body.sessionId)
     if (!sessionId) return result(400, { message: 'Missing session_id for bulk records.' })
 
@@ -153,7 +166,7 @@ export async function submitAttendanceRecord(
         studentId,
         status,
         note: (record.note ?? record.notes)?.toString().trim() || null,
-        documentUrl: (record.document_url ?? record.proof_url)?.toString().trim() || null,
+        documentUrl: null,
         approvalStatus: status === 'SICK' || status === 'PERMITTED' ? 'PENDING' : 'NOT_REQUIRED',
       })
     }
@@ -247,7 +260,7 @@ export async function submitAttendanceRecord(
 
   const approvalStatus = status === 'SICK' || status === 'PERMITTED' ? 'PENDING' : 'NOT_REQUIRED'
   const note = (body.note ?? body.notes)?.toString().trim() || null
-  const documentUrl = (body.document_url ?? body.evidence)?.toString().trim() || null
+  const documentUrl = evidencePath ?? null
   const record = await prisma.attendance_records.upsert({
     where: {
       attendance_session_id_student_id: {
@@ -263,6 +276,100 @@ export async function submitAttendanceRecord(
       note,
       document_url: documentUrl,
       approval_status: approvalStatus,
+    },
+    include: {
+      students: { select: { name: true, nis: true } },
+      attendance_sessions: { include: { classes: { select: { name: true } } } },
+    },
+  })
+
+  return result(200, {
+    message: 'Attendance record submitted successfully.',
+    data: {
+      record_id: record.attendance_record_id.toString(),
+      session_id: record.attendance_session_id.toString(),
+      class_name: record.attendance_sessions.classes.name,
+      student_id: record.student_id.toString(),
+      student_name: record.students.name,
+      student_nis: record.students.nis,
+      status: record.status,
+      note: record.note,
+      document_url: record.document_url,
+      approval_status: record.approval_status,
+      created_at: record.created_at,
+    },
+  })
+}
+
+export async function submitStudentAttendanceRecord(
+  body: Record<string, unknown>,
+  user: SessionUser,
+  evidencePath?: string
+): Promise<ServiceResult> {
+  const status = typeof body.status === 'string' ? body.status.trim().toUpperCase() : ''
+  if (!['PRESENT', 'SICK', 'PERMITTED'].includes(status)) {
+    return result(400, {
+      message: 'Invalid status. Allowed values: PRESENT, SICK, PERMITTED.',
+    })
+  }
+
+  const student = await getStudentProfileByUserId(user.userId)
+  if (!student) return result(403, { message: 'Student profile not found.' })
+
+  const classId = student.student_enrollments[0]?.class_id
+  if (!classId) return result(403, { message: 'Student is not enrolled in a class.' })
+
+  const submittedAt = new Date()
+  const attendanceDate = getServerToday(submittedAt)
+  let session = await prisma.attendance_sessions.findUnique({
+    where: { class_id_attendance_date: { class_id: classId, attendance_date: attendanceDate } },
+  })
+
+  if (!session) {
+    try {
+      session = await prisma.attendance_sessions.create({
+        data: {
+          class_id: classId,
+          attendance_date: attendanceDate,
+          created_by: BigInt(user.userId),
+          created_at: submittedAt,
+        },
+      })
+    } catch (error) {
+      if (!isPrismaUniqueError(error)) throw error
+      session = await prisma.attendance_sessions.findUnique({
+        where: { class_id_attendance_date: { class_id: classId, attendance_date: attendanceDate } },
+      })
+      if (!session) throw error
+    }
+  }
+
+  const note = (body.note ?? body.notes)?.toString().trim() || null
+  const documentUrl = evidencePath ?? null
+  const record = await prisma.attendance_records.upsert({
+    where: {
+      attendance_session_id_student_id: {
+        attendance_session_id: session.attendance_session_id,
+        student_id: student.student_id,
+      },
+    },
+    update: {
+      status,
+      note,
+      document_url: documentUrl,
+      approval_status: 'PENDING',
+      approved_by: null,
+      approved_at: null,
+      created_at: submittedAt,
+    },
+    create: {
+      attendance_session_id: session.attendance_session_id,
+      student_id: student.student_id,
+      status,
+      note,
+      document_url: documentUrl,
+      approval_status: 'PENDING',
+      created_at: submittedAt,
     },
     include: {
       students: { select: { name: true, nis: true } },
@@ -323,6 +430,8 @@ export async function getAttendanceHistory(
 ): Promise<ServiceResult> {
   const role = user.role.toLowerCase()
   let studentId = parseBigIntSafe(rawStudentId)
+  let teacherClassIds: bigint[] | undefined
+  let teacherPeriod: { start_date: Date; end_date: Date } | null = null
 
   if (role === 'student') {
     const student = await getStudentProfileByUserId(user.userId)
@@ -347,14 +456,65 @@ export async function getAttendanceHistory(
       where: { parent_id_student_id: { parent_id: parent.parent_id, student_id: studentId } },
     })
     if (!relationship) return result(403, { message: 'Forbidden. You do not have access to this student.' })
-  } else if (!['teacher', 'homeroom', 'staff', 'admin'].includes(role)) {
+  } else if (!['teacher', 'staff', 'admin'].includes(role)) {
     return result(403, { message: 'Forbidden.' })
   }
 
   if (!studentId) return result(400, { message: 'Missing student_id.' })
 
+  if (role === 'teacher') {
+    const period = await getActivePeriod()
+    if (!period) {
+      return result(200, {
+        data: {
+          student_id: studentId.toString(),
+          history: [],
+          recap: { hadir: 0, izin: 0, sakit: 0, alfa: 0 },
+        },
+      })
+    }
+    teacherPeriod = period
+
+    const teacher = await prisma.teachers.findUnique({
+      where: { user_id: BigInt(user.userId) },
+      select: { teacher_id: true },
+    })
+    if (!teacher) return result(403, { message: 'Teacher profile not found.' })
+
+    const assignments = await prisma.teaching_assignments.findMany({
+      where: {
+        teacher_id: teacher.teacher_id,
+        academic_period_id: period.academic_period_id,
+      },
+      select: { class_id: true },
+    })
+    teacherClassIds = [...new Set(assignments.map((assignment) => assignment.class_id))]
+    if (teacherClassIds.length === 0) {
+      return result(200, {
+        data: {
+          student_id: studentId.toString(),
+          history: [],
+          recap: { hadir: 0, izin: 0, sakit: 0, alfa: 0 },
+        },
+      })
+    }
+  }
+
   const records = await prisma.attendance_records.findMany({
-    where: { student_id: studentId },
+    where: {
+      student_id: studentId,
+      ...(teacherClassIds && teacherPeriod
+        ? {
+            attendance_sessions: {
+              class_id: { in: teacherClassIds },
+              attendance_date: {
+                gte: teacherPeriod.start_date,
+                lte: teacherPeriod.end_date,
+              },
+            },
+          }
+        : {}),
+    },
     include: {
       attendance_sessions: {
         select: { attendance_date: true, classes: { select: { name: true } } },

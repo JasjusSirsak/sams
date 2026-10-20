@@ -1,110 +1,114 @@
-import fs from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Request, Response, NextFunction } from 'express'
+import multer, { MulterError } from 'multer'
+import { fileTypeFromBuffer } from 'file-type'
+import sharp from 'sharp'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
+const SERVER_ROOT = path.resolve(__dirname, '../..')
+const MAX_FILE_SIZE = 2 * 1024 * 1024
 
-// Ensure uploads directory exists
-export const UPLOADS_DIR = path.resolve(__dirname, '../../uploads')
-if (!fs.existsSync(UPLOADS_DIR)) {
-  fs.mkdirSync(UPLOADS_DIR, { recursive: true })
+export const EVIDENCE_DIR = path.resolve(SERVER_ROOT, 'private_uploads', 'attendance-evidence')
+
+declare global {
+  namespace Express {
+    interface Request {
+      evidencePath?: string
+      evidenceFilePath?: string
+    }
+  }
 }
 
-/**
- * Lightweight multipart/form-data parser for single file uploads without external dependencies.
- * Handles both multipart/form-data and JSON/urlencoded payloads seamlessly.
- */
-export function handleEvidenceUpload(fieldName: string = 'file') {
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_FILE_SIZE, files: 1 },
+})
+
+export function handleEvidenceUpload(fieldName = 'file') {
   return (req: Request, res: Response, next: NextFunction) => {
-    const contentType = req.headers['content-type'] || ''
-
-    if (!contentType.includes('multipart/form-data')) {
-      return next()
-    }
-
-    const boundaryMatch = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i)
-    if (!boundaryMatch) {
-      return res.status(400).json({ message: 'Invalid multipart/form-data boundary.' })
-    }
-
-    const boundary = boundaryMatch[1] || boundaryMatch[2]
-    const chunks: Buffer[] = []
-
-    req.on('data', (chunk: Buffer) => {
-      chunks.push(chunk)
-    })
-
-    req.on('end', () => {
-      try {
-        const buffer = Buffer.concat(chunks)
-        const boundaryBuffer = Buffer.from(`--${boundary}`)
-        const endBoundaryBuffer = Buffer.from(`--${boundary}--`)
-
-        let start = 0
-        req.body = req.body || {}
-
-        while (start < buffer.length) {
-          const boundaryIndex = buffer.indexOf(boundaryBuffer, start)
-          if (boundaryIndex === -1) break
-
-          const partStart = boundaryIndex + boundaryBuffer.length
-          if (buffer.slice(partStart, partStart + 2).toString() === '--') {
-            break // Reached final boundary
-          }
-
-          const headerEndIndex = buffer.indexOf('\r\n\r\n', partStart)
-          if (headerEndIndex === -1) break
-
-          const headerStr = buffer.slice(partStart, headerEndIndex).toString('utf-8')
-          const nextBoundaryIndex = buffer.indexOf(boundaryBuffer, headerEndIndex + 4)
-          const partEnd = nextBoundaryIndex !== -1 ? nextBoundaryIndex - 2 : buffer.length
-
-          const partContent = buffer.slice(headerEndIndex + 4, partEnd)
-
-          // Parse Content-Disposition
-          const nameMatch = headerStr.match(/name="([^"]+)"/)
-          const filenameMatch = headerStr.match(/filename="([^"]+)"/)
-
-          if (nameMatch) {
-            const field = nameMatch[1]
-            if (filenameMatch && filenameMatch[1]) {
-              const originalName = filenameMatch[1]
-              const ext = path.extname(originalName) || '.bin'
-              const uniqueName = `evidence-${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`
-              const filePath = path.join(UPLOADS_DIR, uniqueName)
-
-              fs.writeFileSync(filePath, partContent)
-
-              // Attach file info to req.file and req.body.document_url
-              ;(req as any).file = {
-                fieldname: field,
-                originalname: originalName,
-                filename: uniqueName,
-                size: partContent.length,
-                path: filePath,
-              }
-              req.body.document_url = `/uploads/${uniqueName}`
-            } else {
-              // Regular form field
-              req.body[field] = partContent.toString('utf-8').trim()
-            }
-          }
-
-          start = nextBoundaryIndex !== -1 ? nextBoundaryIndex : buffer.length
+    upload.single(fieldName)(req, res, (uploadError: unknown) => {
+      if (uploadError) {
+        if (uploadError instanceof MulterError && uploadError.code === 'LIMIT_FILE_SIZE') {
+          return res.status(413).json({ message: 'Evidence image must not exceed 2 MB.' })
         }
-
-        next()
-      } catch (err) {
-        console.error('Multipart upload parsing failed:', err)
-        return res.status(500).json({ message: 'Failed to process file upload.' })
+        if (uploadError instanceof MulterError) {
+          return res.status(400).json({ message: 'Invalid evidence file upload.' })
+        }
+        return next(uploadError)
       }
-    })
 
-    req.on('error', (err) => {
-      console.error('Request stream error:', err)
-      return res.status(500).json({ message: 'Stream error during upload.' })
+      req.body = req.body || {}
+      req.evidencePath = undefined
+      req.evidenceFilePath = undefined
+
+      if (!req.file) {
+        req.body.document_url = null
+        return next()
+      }
+
+      void processEvidenceFile(req, res, next)
     })
   }
+}
+
+async function processEvidenceFile(req: Request, res: Response, next: NextFunction) {
+  const file = req.file
+  if (!file) return next()
+
+  let detectedType
+  try {
+    detectedType = await fileTypeFromBuffer(file.buffer)
+  } catch (error) {
+    console.error('Failed to inspect attendance evidence file:', error)
+    return res.status(400).json({ message: 'Evidence file must be a valid JPG or PNG image.' })
+  }
+
+  if (!detectedType || !['image/jpeg', 'image/png'].includes(detectedType.mime)) {
+    return res.status(400).json({ message: 'Evidence file must be a valid JPG or PNG image.' })
+  }
+
+  let processedImage: Buffer
+  try {
+    const image = sharp(file.buffer, { limitInputPixels: 40_000_000 }).rotate()
+    processedImage =
+      detectedType.mime === 'image/jpeg'
+        ? await image.jpeg({ quality: 82, mozjpeg: true }).toBuffer()
+        : await image.png({ compressionLevel: 9 }).toBuffer()
+  } catch (error) {
+    console.error('Failed to process attendance evidence image:', error)
+    return res.status(400).json({ message: 'Evidence file must be a valid JPG or PNG image.' })
+  }
+
+  const extension = detectedType.mime === 'image/jpeg' ? '.jpg' : '.png'
+  const filePath = path.join(EVIDENCE_DIR, `${randomUUID()}${extension}`)
+  try {
+    await fs.mkdir(EVIDENCE_DIR, { recursive: true, mode: 0o700 })
+    await fs.writeFile(filePath, processedImage, { flag: 'wx', mode: 0o600 })
+  } catch (error) {
+    return next(error)
+  }
+
+  req.evidenceFilePath = filePath
+  req.evidencePath = path.relative(SERVER_ROOT, filePath).split(path.sep).join('/')
+  req.body.document_url = req.evidencePath
+  return next()
+}
+
+export async function discardEvidenceUpload(req: Request): Promise<void> {
+  if (!req.evidenceFilePath) return
+
+  try {
+    await fs.unlink(req.evidenceFilePath)
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) {
+      throw error
+    }
+  }
+
+  req.evidenceFilePath = undefined
+  req.evidencePath = undefined
 }

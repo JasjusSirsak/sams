@@ -44,7 +44,7 @@ export async function getAttendanceReport(
 ): Promise<AttendanceReport | null> {
   const normalizedRole = role.toLowerCase()
 
-  if (normalizedRole === 'teacher' || normalizedRole === 'homeroom') {
+  if (normalizedRole === 'teacher') {
     const teacher = await prisma.teachers.findUnique({
       where: { user_id: BigInt(userId) },
       select: { teacher_id: true },

@@ -73,7 +73,7 @@ async function verifyTeacherAssignmentOwnership(
 journalsRouter.get(
   '/',
   requireAuth,
-  requireRole('teacher', 'homeroom', 'staff', 'admin'),
+  requireRole('teacher', 'staff', 'admin'),
   async (req: Request, res: Response) => {
     try {
       const sessionUser = req.user!
@@ -92,7 +92,7 @@ journalsRouter.get(
           return res.status(403).json({ message: ownership.message })
         }
         whereClause.teaching_assignment_id = assignmentId
-      } else if (userRole === 'teacher' || userRole === 'homeroom') {
+      } else if (userRole === 'teacher') {
         const teacher = await getTeacherProfileByUserId(sessionUser.userId)
         if (!teacher) {
           return res.status(403).json({ message: 'Teacher profile not found.' })
@@ -142,7 +142,7 @@ journalsRouter.get(
 journalsRouter.post(
   '/',
   requireAuth,
-  requireRole('teacher', 'homeroom', 'staff', 'admin'),
+  requireRole('teacher', 'staff', 'admin'),
   async (req: Request, res: Response) => {
     try {
       const sessionUser = req.user!
@@ -216,7 +216,7 @@ journalsRouter.post(
 journalsRouter.put(
   '/:journalId',
   requireAuth,
-  requireRole('teacher', 'homeroom', 'staff', 'admin'),
+  requireRole('teacher', 'staff', 'admin'),
   async (req: Request, res: Response) => {
     try {
       const sessionUser = req.user!
@@ -281,7 +281,7 @@ journalsRouter.put(
 journalsRouter.delete(
   '/:journalId',
   requireAuth,
-  requireRole('teacher', 'homeroom', 'staff', 'admin'),
+  requireRole('teacher', 'staff', 'admin'),
   async (req: Request, res: Response) => {
     try {
       const sessionUser = req.user!

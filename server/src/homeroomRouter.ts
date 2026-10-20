@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from 'express'
 import prisma from './db'
 import { requireAuth, requireRole } from './auth'
+import { getActivePeriod, getJakartaDate } from './services/academicPeriod'
 
 const homeroomRouter = Router()
 
@@ -25,25 +26,106 @@ function parseBigIntSafe(val: unknown): bigint | null {
 /**
  * Helper to get the authenticated homeroom teacher profile and their assigned classes
  */
-async function getHomeroomTeacherAssignments(userId: string) {
-  const teacher = await prisma.teachers.findUnique({
-    where: { user_id: BigInt(userId) },
+async function getActiveHomeroomAssignments(userId: string) {
+  const period = await getActivePeriod()
+  if (!period) return { period: null, assignments: [] }
+
+  const assignments = await prisma.homeroom_assignments.findMany({
+    where: {
+      teachers: { user_id: BigInt(userId) },
+      academic_period_id: period.academic_period_id,
+    },
+    orderBy: { academic_periods: { start_date: 'desc' } },
     select: {
-      teacher_id: true,
-      name: true,
-      homeroom_assignments: {
-        select: {
-          class_id: true,
-          classes: {
-            select: { class_id: true, name: true, grade_level: true },
-          },
-        },
+      class_id: true,
+      classes: {
+        select: { class_id: true, name: true, grade_level: true },
       },
     },
   })
-
-  return teacher
+  return { period, assignments }
 }
+
+async function approvePresentAttendanceToday(req: Request, res: Response) {
+  const classId = parseBigIntSafe(req.body.class_id ?? req.body.classId)
+  if (!classId) {
+    return res.status(400).json({ message: 'Invalid or missing class_id.' })
+  }
+
+  const sessionUser = req.user!
+  const now = new Date()
+  const today = getJakartaDate(now)
+  const period = await getActivePeriod(now)
+  if (!period) {
+    return res.status(403).json({ message: 'There is no active academic period today.' })
+  }
+
+  try {
+    const approvedCount = await prisma.$transaction(async (transaction) => {
+      const assignment = await transaction.homeroom_assignments.findFirst({
+        where: {
+          class_id: classId,
+          teachers: { user_id: BigInt(sessionUser.userId) },
+          academic_period_id: period.academic_period_id,
+        },
+        select: { homeroom_assignment_id: true },
+      })
+
+      if (!assignment) return null
+
+      const sessions = await transaction.attendance_sessions.findMany({
+        where: { class_id: classId, attendance_date: today },
+        select: { attendance_session_id: true },
+      })
+      if (sessions.length === 0) return 0
+
+      const result = await transaction.attendance_records.updateMany({
+        where: {
+          attendance_session_id: { in: sessions.map((session) => session.attendance_session_id) },
+          status: 'PRESENT',
+          approval_status: 'PENDING',
+        },
+        data: {
+          approval_status: 'APPROVED',
+          approved_by: BigInt(sessionUser.userId),
+          approved_at: now,
+        },
+      })
+
+      return result.count
+    })
+
+    if (approvedCount === null) {
+      return res.status(403).json({
+        message: 'Forbidden. You are not assigned as a homeroom teacher for this class.',
+      })
+    }
+
+    return res.status(200).json({
+      message: `Approved ${approvedCount} pending present attendance record(s) for today.`,
+      approved_count: approvedCount,
+    })
+  } catch (error) {
+    console.error('Failed to bulk approve present attendance:', error)
+    return res.status(500).json({
+      message: 'Internal server error while approving attendance.',
+    })
+  }
+}
+
+homeroomRouter.put(
+  ['/approve-all-present', '/attendance/approve-all-present'],
+  requireAuth,
+  requireRole('teacher'),
+  approvePresentAttendanceToday
+)
+
+homeroomRouter.post(
+  ['/approve-all-present', '/attendance/approve-all-present'],
+  requireAuth,
+  requireRole('teacher'),
+  approvePresentAttendanceToday
+)
 
 /**
  * GET /api/homeroom/attendance-requests
@@ -52,32 +134,16 @@ async function getHomeroomTeacherAssignments(userId: string) {
 homeroomRouter.get(
   ['/', '/attendance-requests', '/requests'],
   requireAuth,
-  requireRole('homeroom', 'teacher', 'admin', 'staff'),
+  requireRole('teacher'),
   async (req: Request, res: Response) => {
     try {
-      const sessionUser = req.user!
-      const userRole = (sessionUser.role || '').toLowerCase()
-
-      // 1. Fetch teacher and homeroom assignment
-      const teacher = await getHomeroomTeacherAssignments(sessionUser.userId)
-
-      // Admin or staff can query all or specific classes, but for homeroom/teacher we enforce homeroom assignment
-      let assignedClassIds: bigint[] = []
-
-      if (userRole === 'homeroom' || userRole === 'teacher') {
-        if (!teacher || teacher.homeroom_assignments.length === 0) {
-          return res.status(403).json({
-            message: 'Forbidden. You are not assigned as a homeroom teacher for any class.',
-          })
-        }
-        assignedClassIds = teacher.homeroom_assignments.map((ha) => ha.class_id)
-      } else {
-        // Admin or staff
-        if (req.query.class_id) {
-          const parsedId = parseBigIntSafe(req.query.class_id)
-          if (parsedId) assignedClassIds = [parsedId]
-        }
+      const { period, assignments } = await getActiveHomeroomAssignments(req.user!.userId)
+      if (!period || assignments.length === 0) {
+        return res.status(403).json({
+          message: 'Forbidden. You do not have an active homeroom assignment for today.',
+        })
       }
+      const assignedClassIds = assignments.map((assignment) => assignment.class_id)
 
       // Filter by approval_status (default: PENDING)
       const statusFilter = (req.query.status as string)?.trim().toUpperCase() || 'PENDING'
@@ -85,10 +151,17 @@ homeroomRouter.get(
       // 2. Query attendance records
       const whereCondition: any = {
         approval_status: statusFilter,
+        attendance_sessions: {
+          attendance_date: {
+            gte: period.start_date,
+            lte: period.end_date,
+          },
+        },
       }
 
       if (assignedClassIds.length > 0) {
         whereCondition.attendance_sessions = {
+          ...whereCondition.attendance_sessions,
           class_id: { in: assignedClassIds },
         }
       }
@@ -172,11 +245,10 @@ homeroomRouter.get(
 homeroomRouter.patch(
   ['/attendance-requests/:recordId', '/requests/:recordId', '/:recordId'],
   requireAuth,
-  requireRole('homeroom', 'teacher', 'admin', 'staff'),
+  requireRole('teacher'),
   async (req: Request, res: Response) => {
     try {
       const sessionUser = req.user!
-      const userRole = (sessionUser.role || '').toLowerCase()
       const recordId = parseBigIntSafe(req.params.recordId)
 
       if (!recordId) {
@@ -220,24 +292,14 @@ homeroomRouter.patch(
 
       // 2. Strict Homeroom Authorization Check
       // Verify that the logged-in user is the homeroom teacher of the student's class
-      if (userRole === 'homeroom' || userRole === 'teacher') {
-        const teacher = await getHomeroomTeacherAssignments(sessionUser.userId)
-
-        if (!teacher || teacher.homeroom_assignments.length === 0) {
-          return res.status(403).json({
-            message: 'Forbidden. You are not assigned as a homeroom teacher for any class.',
-          })
-        }
-
-        const isHomeroomOfClass = teacher.homeroom_assignments.some(
-          (ha) => ha.class_id === record.attendance_sessions.class_id
-        )
-
-        if (!isHomeroomOfClass) {
-          return res.status(403).json({
-            message: `Forbidden. You do not have permission to review attendance for class "${record.attendance_sessions.classes.name}". You are not the assigned homeroom teacher for this class.`,
-          })
-        }
+      const { assignments } = await getActiveHomeroomAssignments(sessionUser.userId)
+      const isAssignedClass = assignments.some(
+        (assignment) => assignment.class_id === record.attendance_sessions.class_id
+      )
+      if (!isAssignedClass) {
+        return res.status(403).json({
+          message: `Forbidden. You are not assigned to class "${record.attendance_sessions.classes.name}" for the current academic period.`,
+        })
       }
 
       // 3. Update attendance record approval status
@@ -293,11 +355,10 @@ homeroomRouter.patch(
 homeroomRouter.post(
   ['/approve', '/reject'],
   requireAuth,
-  requireRole('homeroom', 'teacher', 'admin', 'staff'),
+  requireRole('teacher'),
   async (req: Request, res: Response) => {
     try {
       const sessionUser = req.user!
-      const userRole = (sessionUser.role || '').toLowerCase()
       const recordId = parseBigIntSafe(req.body.record_id ?? req.body.recordId ?? req.body.id)
 
       if (!recordId) {
@@ -331,21 +392,14 @@ homeroomRouter.post(
         })
       }
 
-      if (userRole === 'homeroom' || userRole === 'teacher') {
-        const teacher = await getHomeroomTeacherAssignments(sessionUser.userId)
-        if (!teacher || teacher.homeroom_assignments.length === 0) {
-          return res.status(403).json({
-            message: 'Forbidden. You are not assigned as a homeroom teacher for any class.',
-          })
-        }
-        const isHomeroomOfClass = teacher.homeroom_assignments.some(
-          (ha) => ha.class_id === record.attendance_sessions.class_id
-        )
-        if (!isHomeroomOfClass) {
-          return res.status(403).json({
-            message: `Forbidden. You do not have permission to review attendance for class "${record.attendance_sessions.classes.name}". You are not the assigned homeroom teacher for this class.`,
-          })
-        }
+      const { assignments } = await getActiveHomeroomAssignments(sessionUser.userId)
+      const isAssignedClass = assignments.some(
+        (assignment) => assignment.class_id === record.attendance_sessions.class_id
+      )
+      if (!isAssignedClass) {
+        return res.status(403).json({
+          message: `Forbidden. You are not assigned to class "${record.attendance_sessions.classes.name}" for the current academic period.`,
+        })
       }
 
       const updateData: any = {

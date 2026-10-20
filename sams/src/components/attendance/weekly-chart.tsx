@@ -6,7 +6,17 @@ import { Card, CardLabel, Skeleton, STATUS_META } from '@/components/ui-kit'
 
 const ORDER: AttendanceStatus[] = ['hadir', 'izin', 'sakit', 'alfa']
 
-export function WeeklyChart({ className }: { className?: string }) {
+export function WeeklyChart({
+  className,
+  classLabel,
+  weeklyData,
+  isLoading,
+}: {
+  className?: string
+  classLabel?: string
+  weeklyData?: TeacherWeeklyAttendanceDay[]
+  isLoading?: boolean
+}) {
   const [weekly, setWeekly] = useState<TeacherWeeklyAttendanceDay[]>([])
   const [classNameLabel, setClassNameLabel] = useState<string>('Classes')
   const [loading, setLoading] = useState<boolean>(true)
@@ -28,18 +38,22 @@ export function WeeklyChart({ className }: { className?: string }) {
   }
 
   useEffect(() => {
-    fetchWeekly()
-  }, [])
+    if (weeklyData !== undefined) return
+    void Promise.resolve().then(fetchWeekly)
+  }, [weeklyData])
 
-  const totalAllWeek = weekly.reduce((acc, d) => acc + d.hadir + d.izin + d.sakit + d.alfa, 0)
+  const displayedWeekly = weeklyData ?? weekly
+  const displayedClassName = classLabel ?? classNameLabel
+  const displayedLoading = weeklyData === undefined ? loading : (isLoading ?? false)
+  const totalAllWeek = displayedWeekly.reduce((acc, d) => acc + d.hadir + d.izin + d.sakit + d.alfa, 0)
 
   return (
     <Card className={className}>
-      <CardLabel action={<span className="text-xs text-muted">{classNameLabel} · this week</span>}>
+      <CardLabel action={<span className="text-xs text-muted">{displayedClassName} · this week</span>}>
         Class attendance
       </CardLabel>
 
-      {loading ? (
+      {displayedLoading ? (
         <div className="flex h-48 items-end gap-3 sm:gap-6">
           {[1, 2, 3, 4, 5].map((i) => (
             <div key={i} className="flex h-full flex-1 flex-col items-center gap-2">
@@ -69,8 +83,8 @@ export function WeeklyChart({ className }: { className?: string }) {
           </p>
         </div>
       ) : (
-        <div className="flex h-48 items-end gap-3 sm:gap-6" role="img" aria-label={`Stacked weekly attendance chart for ${classNameLabel}`}>
-          {weekly.map((d) => {
+        <div className="flex h-48 items-end gap-3 sm:gap-6" role="img" aria-label={`Stacked weekly attendance chart for ${displayedClassName}`}>
+          {displayedWeekly.map((d) => {
             const total = ORDER.reduce((sum, s) => sum + (d[s] || 0), 0)
             return (
               <div key={d.day} className="flex h-full flex-1 flex-col items-center gap-2">
@@ -104,4 +118,3 @@ export function WeeklyChart({ className }: { className?: string }) {
     </Card>
   )
 }
-

@@ -62,7 +62,7 @@ export async function verifyParentStudentAccess(req: Request, res: Response, nex
     const userRole = (sessionUser.role || '').toLowerCase()
 
     // Administrative roles pass-through
-    if (['admin', 'staff', 'teacher', 'homeroom'].includes(userRole)) {
+    if (['admin', 'staff', 'teacher'].includes(userRole)) {
       return next()
     }
 

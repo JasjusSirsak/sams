@@ -258,26 +258,37 @@ export async function getStudents(): Promise<Student[]> {
 }
 
 export type TeacherDashboardSummary = {
-  teacher_id: string
-  name: string
-  classes_taught: number
+  teacher_name: string
+  employee_number: string | null
+  classes_taught_count: number
   total_students: number
+  classes: {
+    class_id: string
+    name: string
+    student_count: number
+  }[]
+  is_homeroom: boolean
+  homeroom_class_id: string | null
   attendance_today: {
-    rate: number
     present: number
-    total: number
-    hint: string
-  }
-  subjects: string[]
+    sick: number
+    permitted: number
+    absent: number
+    pending: number
+    not_recorded: number
+  } | null
   active_period: {
-    academic_year: string
+    id: string
+    year: string
     semester: number
   } | null
 }
 
 export async function getTeacherDashboardSummary(): Promise<TeacherDashboardSummary> {
-  const response = await apiClient.get<{ data: TeacherDashboardSummary }>('/teacher/dashboard-summary')
-  return response.data.data
+  const response = await apiClient.get<TeacherDashboardSummary | { data: TeacherDashboardSummary }>(
+    '/teacher/dashboard-summary',
+  )
+  return 'data' in response.data ? response.data.data : response.data
 }
 
 export type TeacherClassItem = {
@@ -316,6 +327,36 @@ export async function getTeacherWeeklyAttendance(): Promise<TeacherWeeklyAttenda
   return response.data.data
 }
 
+export type TeacherClassAttendanceStudent = {
+  student_id: string
+  name: string
+  nis: string
+  record_id: string | null
+  status: string | null
+  approval_status: string | null
+  note: string | null
+  has_evidence: boolean | null
+}
+
+export type TeacherClassAttendance = {
+  class: { id: string; name: string }
+  period: { id: string; year: string; semester: number }
+  date: string
+  is_homeroom: boolean
+  students: TeacherClassAttendanceStudent[]
+  weekly: TeacherWeeklyAttendanceDay[]
+}
+
+export async function getTeacherClassAttendance(
+  classId: string,
+  date?: string,
+): Promise<TeacherClassAttendance> {
+  const response = await apiClient.get<{ data: TeacherClassAttendance }>('/attendance/class', {
+    params: { classId, ...(date ? { date } : {}) },
+  })
+  return response.data.data
+}
+
 export type SharedAgendaItem = {
   id: string
   source: 'agenda' | 'schedule'
@@ -328,8 +369,20 @@ export type SharedAgendaItem = {
   className: string | null
 }
 
-export async function getSharedAgenda(params: { date: string; studentId?: string }): Promise<SharedAgendaItem[]> {
-  const response = await apiClient.get<{ data: SharedAgendaItem[] }>('/agenda', { params })
+export type DatedSharedAgendaItems = {
+  date: string
+  items: SharedAgendaItem[]
+}
+
+export function getSharedAgenda(params: { date: string; studentId?: string }): Promise<SharedAgendaItem[]>
+export function getSharedAgenda(params: { from: string; to: string; studentId?: string }): Promise<DatedSharedAgendaItems[]>
+export async function getSharedAgenda(params: {
+  date?: string
+  from?: string
+  to?: string
+  studentId?: string
+}): Promise<SharedAgendaItem[] | DatedSharedAgendaItems[]> {
+  const response = await apiClient.get<{ data: SharedAgendaItem[] | DatedSharedAgendaItems[] }>('/agenda', { params })
   return response.data.data
 }
 

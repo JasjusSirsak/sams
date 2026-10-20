@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, type FormEvent } from 'react'
+import imageCompression from 'browser-image-compression'
 import { AlertCircle, Clock, Paperclip, RefreshCw, Upload } from 'lucide-react'
 import { getTodayAttendance, submitAttendance, type TodayAttendanceRecord } from '@/lib/api'
 import { cn } from '@/lib/helpers'
@@ -19,6 +20,7 @@ type TodayViewRecord = {
 
 const OPTIONS: AttendanceStatus[] = ['hadir', 'izin', 'sakit']
 const MAX_FILE_MB = 2
+const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png']
 
 function toTodayViewRecord(record: TodayAttendanceRecord): TodayViewRecord {
   const statusMap: Record<string, AttendanceStatus> = {
@@ -117,11 +119,30 @@ export function TodayAttendance() {
     setSubmitError('')
     setSubmitting(true)
     try {
+      let uploadFile: File | null = null
+      if (needsEvidence && file) {
+        try {
+          uploadFile = await imageCompression(file, {
+            maxSizeMB: 1,
+            maxWidthOrHeight: 1920,
+            useWebWorker: true,
+          })
+        } catch {
+          setSubmitError('The image could not be compressed. Please choose another JPG or PNG image.')
+          return
+        }
+
+        if (uploadFile.size > MAX_FILE_MB * 1024 * 1024) {
+          setSubmitError(`The compressed image is larger than ${MAX_FILE_MB} MB. Please choose a smaller image.`)
+          return
+        }
+      }
+
       const serverStatus = status === 'hadir' ? 'PRESENT' : status === 'sakit' ? 'SICK' : 'PERMITTED'
       const response = await submitAttendance({
         status: serverStatus,
         note: needsEvidence ? note.trim() : undefined,
-        file: needsEvidence ? file : null,
+        file: uploadFile,
       })
       setToday(toTodayViewRecord(response.data))
     } catch (error: unknown) {
@@ -132,9 +153,14 @@ export function TodayAttendance() {
   }
 
   function handleFile(fileToUpload: File | null) {
+    if (fileToUpload && !ALLOWED_IMAGE_TYPES.includes(fileToUpload.type)) {
+      setFile(null)
+      setSubmitError('Please choose a JPG or PNG image.')
+      return
+    }
     if (fileToUpload && fileToUpload.size > MAX_FILE_MB * 1024 * 1024) {
       setFile(null)
-      setSubmitError(`File is too large. Maximum size is ${MAX_FILE_MB} MB.`)
+      setSubmitError(`The image is larger than ${MAX_FILE_MB} MB. Please choose a smaller image.`)
       return
     }
     setSubmitError('')
@@ -289,13 +315,16 @@ export function TodayAttendance() {
               </label>
               <label className="flex h-[86px] cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-line px-3 text-center text-sm text-muted hover:border-primary/50">
                 <Upload className="size-5" aria-hidden="true" />
-                {file ? <span className="truncate text-ink">{file.name}</span> : <span>Upload image or PDF (max {MAX_FILE_MB} MB)</span>}
+                {file ? <span className="truncate text-ink">{file.name}</span> : <span>Upload a JPG or PNG image (max {MAX_FILE_MB} MB)</span>}
                 <input
                   id="evidence"
                   type="file"
-                  accept="image/*,.pdf"
+                  accept="image/jpeg,image/png"
                   className="sr-only"
-                  onChange={(event) => handleFile(event.target.files?.[0] ?? null)}
+                  onChange={(event) => {
+                    handleFile(event.target.files?.[0] ?? null)
+                    event.target.value = ''
+                  }}
                 />
               </label>
             </div>
