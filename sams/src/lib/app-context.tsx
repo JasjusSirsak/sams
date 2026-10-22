@@ -123,7 +123,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
             status: statusMapped,
             date: dateFormatted,
             note: r.note || '',
-            evidence: r.evidence_filename || '',
+            hasEvidence: r.has_evidence,
+            evidenceFilename: r.evidence_filename,
           }
         })
         setPending(mapped)

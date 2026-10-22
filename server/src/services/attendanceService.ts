@@ -287,6 +287,9 @@ export async function submitAttendanceRecord(
   if (!status) {
     return result(400, { message: 'Invalid status. Allowed values: PRESENT, SICK, PERMITTED, ABSENT.' })
   }
+  if (evidencePath && status !== 'SICK' && status !== 'PERMITTED') {
+    return result(400, { message: 'Evidence is only allowed for sick or permitted attendance.' })
+  }
 
   const approvalStatus = status === 'SICK' || status === 'PERMITTED' ? 'PENDING' : 'NOT_REQUIRED'
   const note = (body.note ?? body.notes)?.toString().trim() || null
@@ -341,6 +344,9 @@ export async function submitStudentAttendanceRecord(
     return result(400, {
       message: 'Invalid status. Allowed values: PRESENT, SICK, PERMITTED.',
     })
+  }
+  if (evidencePath && status !== 'SICK' && status !== 'PERMITTED') {
+    return result(400, { message: 'Evidence is only allowed for sick or permitted attendance.' })
   }
 
   const submittedAt = new Date()

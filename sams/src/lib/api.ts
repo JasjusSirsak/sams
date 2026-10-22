@@ -39,7 +39,9 @@ export async function submitAttendance(payload: SubmitAttendanceParams): Promise
     if (payload.class_id) formData.append('class_id', payload.class_id)
     formData.append('file', payload.file)
 
-    const response = await apiClient.post<SubmitAttendanceResponse>('/attendance/record', formData)
+    const response = await apiClient.post<SubmitAttendanceResponse>('/attendance/record', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
     return response.data
   }
 
@@ -56,6 +58,19 @@ export async function submitAttendance(payload: SubmitAttendanceParams): Promise
 export async function getTodayAttendance(): Promise<TodayAttendanceRecord | null> {
   const response = await apiClient.get<{ data: TodayAttendanceRecord | null }>('/attendance/today')
   return response.data.data
+}
+
+export async function getAttendanceEvidence(filename: string, signal?: AbortSignal): Promise<Blob> {
+  const token = typeof window === 'undefined' ? null : localStorage.getItem('sams_token')
+  const response = await fetch(`/api/attendance/evidence/${encodeURIComponent(filename)}`, {
+    credentials: 'include',
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    signal,
+  })
+  if (!response.ok) {
+    throw new Error(response.status === 404 ? 'Evidence file not found.' : 'Failed to load attendance evidence.')
+  }
+  return response.blob()
 }
 
 export async function saveGrades(payload: {

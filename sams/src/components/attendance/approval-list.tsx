@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { Link } from '@/lib/nav'
 import { AlertCircle, Eye, Paperclip, RefreshCw } from 'lucide-react'
 import { useApp } from '@/lib/app-context'
-import { getHomeroomRequests, reviewRequest, type HomeroomAttendanceRequest } from '@/lib/api'
+import { getAttendanceEvidence, getHomeroomRequests, reviewRequest, type HomeroomAttendanceRequest } from '@/lib/api'
 import type { AttendanceStatus, PendingRequest } from '@/lib/data'
 import { cn } from '@/lib/helpers'
 import {
@@ -28,6 +28,58 @@ const initials = (name: string) =>
     .map((p) => p[0])
     .join('')
     .slice(0, 2)
+
+function AttendanceEvidence({ request }: { request: PendingRequest }) {
+  const [imageUrl, setImageUrl] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState(false)
+
+  useEffect(() => {
+    if (!request.hasEvidence || !request.evidenceFilename) return
+
+    const controller = new AbortController()
+    let objectUrl: string | null = null
+    getAttendanceEvidence(request.evidenceFilename, controller.signal)
+      .then((blob) => {
+        if (controller.signal.aborted) return
+        objectUrl = URL.createObjectURL(blob)
+        setImageUrl(objectUrl)
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setLoadError(true)
+      })
+
+    return () => {
+      controller.abort()
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [request.evidenceFilename, request.hasEvidence])
+
+  if (!request.hasEvidence) {
+    return <span className="text-sm text-muted">No file</span>
+  }
+  if (!request.evidenceFilename) {
+    return <span className="text-sm text-muted">Evidence file is unavailable.</span>
+  }
+
+  return (
+    <div className="mt-2 space-y-2">
+      {imageUrl ? (
+        <img
+          src={imageUrl}
+          alt={`Attendance evidence: ${request.evidenceFilename}`}
+          className="max-h-64 max-w-full rounded-lg border border-line object-contain"
+        />
+      ) : (
+        <p className="text-xs text-muted">
+          {loadError ? 'Unable to load evidence.' : 'Loading evidence...'}
+        </p>
+      )}
+      <p className="flex items-center gap-1 text-xs text-muted">
+        <Paperclip className="size-3.5" aria-hidden="true" /> {request.evidenceFilename}
+      </p>
+    </div>
+  )
+}
 
 export function ApprovalList({ limit, showReviewed = false }: { limit?: number; showReviewed?: boolean }) {
   const { reviewed, decide } = useApp()
@@ -62,7 +114,8 @@ export function ApprovalList({ limit, showReviewed = false }: { limit?: number; 
             status: statusMapped as 'izin' | 'sakit',
             date: dateFormatted,
             note: r.note || '',
-            evidence: r.evidence_filename || '',
+            hasEvidence: r.has_evidence,
+            evidenceFilename: r.evidence_filename,
           }
         })
         setRequests(mapped)
@@ -182,9 +235,7 @@ export function ApprovalList({ limit, showReviewed = false }: { limit?: number; 
                       NIS {item.nis} · {item.date}
                     </p>
                     <p className="mt-2 text-sm text-ink">{item.note}</p>
-                    <p className="mt-1 flex items-center gap-1 text-xs text-muted">
-                      <Paperclip className="size-3.5" aria-hidden="true" /> {item.evidence || 'No file'}
-                    </p>
+                    <AttendanceEvidence request={item} />
                   </div>
                   <div className="flex gap-2">
                     <button type="button" onClick={() => setAction({ item, decision: 'rejected' })} className={cn(buttonSecondary, 'px-3 py-2 text-danger')}>
@@ -245,7 +296,10 @@ export function ApprovalList({ limit, showReviewed = false }: { limit?: number; 
               </div>
               <p className="text-sm text-ink">{action.item.note}</p>
               <p className="mt-3 flex items-center gap-2 text-sm text-ink">
-                <Eye className="size-4 text-muted" aria-hidden="true" /> Evidence: {action.item.evidence || 'No file'}
+                <Eye className="size-4 text-muted" aria-hidden="true" />
+                Evidence: {action.item.hasEvidence
+                  ? action.item.evidenceFilename ?? 'Evidence attached'
+                  : 'No file'}
               </p>
             </div>
 
