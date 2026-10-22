@@ -48,7 +48,7 @@ attendanceRouter.get(
         return res.status(400).json({ message: 'Date must use YYYY-MM-DD format.' })
       }
       const parsedDate = new Date(`${dateValue}T00:00:00.000Z`)
-      if (parsedDate.toISOString().slice(0, 10) !== dateValue) {
+      if (Number.isNaN(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== dateValue) {
         return res.status(400).json({ message: 'Date must be a valid calendar date.' })
       }
       selectedDate = parsedDate
@@ -259,7 +259,7 @@ attendanceRouter.get(
       const isAssignedHomeroomTeacher = assignment !== null
 
       if (!isAuthorizedStaff && !isOwningStudent && !isAssignedHomeroomTeacher) {
-        return res.status(403).json({ message: 'Forbidden. You cannot access this evidence file.' })
+        return res.status(404).json({ message: 'Evidence file not found.' })
       }
 
       const filePath = path.join(EVIDENCE_DIR, filename)
@@ -323,6 +323,7 @@ attendanceRouter.post(
 attendanceRouter.post(
   ['/record', '/records'],
   requireAuth,
+  requireRole('teacher', 'staff', 'admin', 'student'),
   handleEvidenceUpload('file'),
   async (req: Request, res: Response) => {
     try {

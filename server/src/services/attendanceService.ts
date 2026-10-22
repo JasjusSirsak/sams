@@ -1,5 +1,5 @@
 import prisma from '../db'
-import { getActivePeriod } from './academicPeriod'
+import { getActivePeriod, getJakartaDate } from './academicPeriod'
 
 export type ServiceResult<T = unknown> = {
   statusCode: number
@@ -51,10 +51,6 @@ function parseDateString(value: unknown): Date | null {
   return date
 }
 
-function getServerToday(now: Date): Date {
-  return new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()))
-}
-
 function isPrismaUniqueError(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002'
 }
@@ -72,18 +68,52 @@ async function getStudentProfileByUserId(userId: string) {
   })
 }
 
+async function getStudentAttendanceContext(userId: string, now = new Date()) {
+  const [student, period] = await Promise.all([
+    prisma.students.findUnique({
+      where: { user_id: BigInt(userId) },
+      select: { student_id: true },
+    }),
+    getActivePeriod(now),
+  ])
+  if (!student || !period) {
+    return { studentId: student?.student_id ?? null, classId: null, attendanceDate: getJakartaDate(now), hasActivePeriod: !!period }
+  }
+
+  const enrollment = await prisma.student_enrollments.findFirst({
+    where: {
+      student_id: student.student_id,
+      academic_period_id: period.academic_period_id,
+    },
+    select: { class_id: true },
+  })
+  return {
+    studentId: student.student_id,
+    classId: enrollment?.class_id ?? null,
+    attendanceDate: getJakartaDate(now),
+    hasActivePeriod: true,
+  }
+}
+
 export async function createOrGetAttendanceSession(
   body: Record<string, unknown>,
   user: SessionUser
 ): Promise<ServiceResult> {
-  let classId = parseBigIntSafe(body.class_id ?? body.classId)
-  if (!classId && user.role.toLowerCase() === 'student') {
-    const student = await getStudentProfileByUserId(user.userId)
-    classId = student?.student_enrollments[0]?.class_id ?? null
+  let classId: bigint | null
+  let attendanceDate: Date | null
+  if (user.role.toLowerCase() === 'student') {
+    const context = await getStudentAttendanceContext(user.userId)
+    if (!context.studentId) return result(403, { message: 'Student profile not found.' })
+    if (!context.hasActivePeriod) return result(403, { message: 'There is no active academic period today.' })
+    if (!context.classId) return result(403, { message: 'Student is not enrolled in an active class.' })
+    classId = context.classId
+    attendanceDate = context.attendanceDate
+  } else {
+    classId = parseBigIntSafe(body.class_id ?? body.classId)
+    const rawDate = body.date ?? body.attendance_date ?? new Date().toISOString().slice(0, 10)
+    attendanceDate = parseDateString(rawDate)
   }
 
-  const rawDate = body.date ?? body.attendance_date ?? new Date().toISOString().slice(0, 10)
-  const attendanceDate = parseDateString(rawDate)
   const agendaId = parseBigIntSafe(body.agenda_id ?? body.agendaId)
   if (!classId) return result(400, { message: 'Invalid or missing class_id.' })
   if (!attendanceDate) return result(400, { message: 'Invalid date format. Expected YYYY-MM-DD.' })
@@ -313,14 +343,14 @@ export async function submitStudentAttendanceRecord(
     })
   }
 
-  const student = await getStudentProfileByUserId(user.userId)
-  if (!student) return result(403, { message: 'Student profile not found.' })
-
-  const classId = student.student_enrollments[0]?.class_id
-  if (!classId) return result(403, { message: 'Student is not enrolled in a class.' })
-
   const submittedAt = new Date()
-  const attendanceDate = getServerToday(submittedAt)
+  const context = await getStudentAttendanceContext(user.userId, submittedAt)
+  if (!context.studentId) return result(403, { message: 'Student profile not found.' })
+  if (!context.hasActivePeriod) return result(403, { message: 'There is no active academic period today.' })
+  if (!context.classId) return result(403, { message: 'Student is not enrolled in an active class.' })
+
+  const classId = context.classId
+  const attendanceDate = context.attendanceDate
   let session = await prisma.attendance_sessions.findUnique({
     where: { class_id_attendance_date: { class_id: classId, attendance_date: attendanceDate } },
   })
@@ -350,7 +380,7 @@ export async function submitStudentAttendanceRecord(
     where: {
       attendance_session_id_student_id: {
         attendance_session_id: session.attendance_session_id,
-        student_id: student.student_id,
+        student_id: context.studentId,
       },
     },
     update: {
@@ -364,7 +394,7 @@ export async function submitStudentAttendanceRecord(
     },
     create: {
       attendance_session_id: session.attendance_session_id,
-      student_id: student.student_id,
+      student_id: context.studentId,
       status,
       note,
       document_url: documentUrl,

@@ -156,7 +156,8 @@ export interface HomeroomAttendanceRequest {
   }
   attendance_status: string
   note: string | null
-  document_url: string | null
+  has_evidence: boolean
+  evidence_filename: string | null
   approval_status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'NOT_REQUIRED'
   approved_by: string | null
   approved_at: string | null

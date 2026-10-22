@@ -152,9 +152,9 @@ export type PendingRequest = {
 }
 
 export const INITIAL_PENDING: PendingRequest[] = [
-  { id: 'p1', student: 'Bima Nugroho', nis: '2024103', status: 'sakit', date: 'Wed, 7 Oct', note: 'Fever since last night, doctor letter attached.', evidence: 'surat-dokter-bima.pdf' },
-  { id: 'p2', student: 'Dimas Aditya', nis: '2024105', status: 'izin', date: 'Wed, 7 Oct', note: 'Family wedding in Bandung.', evidence: 'surat-izin-dimas.jpg' },
-  { id: 'p3', student: 'Eka Putri', nis: '2024106', status: 'sakit', date: 'Tue, 6 Oct', note: 'Dental appointment and recovery.', evidence: 'klinik-eka.pdf' },
+  { id: 'p1', student: 'Bima Nugroho', nis: '2024103', status: 'sakit', date: 'Wed, 7 Oct', note: 'Fever since last night, doctor letter attached.', evidence: 'doctor-note-bima.pdf' },
+  { id: 'p2', student: 'Dimas Aditya', nis: '2024105', status: 'izin', date: 'Wed, 7 Oct', note: 'Family wedding in Bandung.', evidence: 'permission-letter-dimas.jpg' },
+  { id: 'p3', student: 'Eka Putri', nis: '2024106', status: 'sakit', date: 'Tue, 6 Oct', note: 'Dental appointment and recovery.', evidence: 'clinic-note-eka.pdf' },
 ]
 
 export const NOTIFICATIONS: Record<Role, string[]> = {

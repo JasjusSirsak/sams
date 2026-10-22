@@ -1,8 +1,10 @@
 import 'dotenv/config'
 import express from 'express'
+import type { ErrorRequestHandler } from 'express'
 import cookieParser from 'cookie-parser'
 import helmet from 'helmet'
 import rateLimit from 'express-rate-limit'
+import { MulterError } from 'multer'
 import prisma from './db'
 import authRouter from './authRouter'
 import teacherRouter from './teacherRouter'
@@ -31,8 +33,8 @@ app.use(helmet({
 }))
 app.disable('x-powered-by')
 
-app.use(express.json({ limit: '10mb' }))
-app.use(express.urlencoded({ extended: true, limit: '10mb' }))
+app.use(express.json({ limit: '100kb' }))
+app.use(express.urlencoded({ extended: true, limit: '100kb' }))
 app.use(cookieParser())
 
 // 2. Rate Limiter for Login Endpoint (Prevents brute-force & credential stuffing)
@@ -196,6 +198,27 @@ app.get(
     }
   }
 )
+
+const errorHandler: ErrorRequestHandler = (error, _req, res, next) => {
+  if (res.headersSent) return next(error)
+
+  if (error instanceof MulterError) {
+    const statusCode = error.code === 'LIMIT_FILE_SIZE' ? 413 : 400
+    return res.status(statusCode).json({
+      message: statusCode === 413 ? 'Uploaded file is too large.' : 'Invalid file upload.',
+    })
+  }
+
+  console.error('Unhandled request error:', error)
+  const isProduction = process.env.NODE_ENV === 'production'
+  const details = error instanceof Error ? error : new Error('Internal server error.')
+  return res.status(500).json(
+    isProduction
+      ? { message: 'Internal server error.' }
+      : { message: details.message, stack: details.stack }
+  )
+}
+app.use(errorHandler)
 
 // ── Start server ────────────────────────────────
 app.listen(PORT, () => {

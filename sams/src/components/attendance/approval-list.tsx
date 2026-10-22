@@ -62,7 +62,7 @@ export function ApprovalList({ limit, showReviewed = false }: { limit?: number; 
             status: statusMapped as 'izin' | 'sakit',
             date: dateFormatted,
             note: r.note || '',
-            evidence: r.document_url || '',
+            evidence: r.evidence_filename || '',
           }
         })
         setRequests(mapped)

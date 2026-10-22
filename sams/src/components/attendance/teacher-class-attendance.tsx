@@ -10,7 +10,6 @@ import {
   type TeacherClassAttendanceStudent,
   type TeacherDashboardSummary,
 } from '@/lib/api'
-import { useApp } from '@/lib/app-context'
 import { ApprovalBadge, Card, EmptyState, PageHeader, Pill, StatusBadge, buttonSecondary, inputClass } from '@/components/ui-kit'
 import { WeeklyChart } from './weekly-chart'
 import type { Approval, AttendanceStatus } from '@/lib/data'
@@ -42,7 +41,6 @@ function toApprovalStatus(status: string): Approval | null {
 }
 
 export function TeacherClassAttendance() {
-  const { homeroomClassId } = useApp()
   const [summary, setSummary] = useState<TeacherDashboardSummary | null>(null)
   const [summaryLoading, setSummaryLoading] = useState(true)
   const [summaryError, setSummaryError] = useState<string | null>(null)
@@ -60,7 +58,7 @@ export function TeacherClassAttendance() {
       .then((data) => {
         if (!isMounted) return
         setSummary(data)
-        setClassId((current) => current || homeroomClassId || data.classes[0]?.class_id || '')
+        setClassId((current) => current || data.homeroom_class_id || data.classes[0]?.class_id || '')
         setSummaryLoading(false)
       })
       .catch((requestError: unknown) => {
@@ -71,7 +69,7 @@ export function TeacherClassAttendance() {
     return () => {
       isMounted = false
     }
-  }, [homeroomClassId])
+  }, [])
 
   useEffect(() => {
     if (!classId) return
@@ -104,6 +102,7 @@ export function TeacherClassAttendance() {
   }, [classId, date])
 
   const classes = summary?.classes ?? []
+  const homeroomClassId = summary?.homeroom_class_id ?? null
   const hasHomeroomOption = Boolean(
     homeroomClassId && !classes.some((item) => item.class_id === homeroomClassId),
   )
@@ -189,7 +188,11 @@ export function TeacherClassAttendance() {
           value={classId}
           onChange={(event) => setClassId(event.target.value)}
         >
-          {hasHomeroomOption && <option value={homeroomClassId!}>{attendance?.class.name ?? 'Homeroom class'}</option>}
+          {hasHomeroomOption && (
+            <option value={homeroomClassId!}>
+              {attendance?.class.id === homeroomClassId ? attendance.class.name : 'Homeroom class'}
+            </option>
+          )}
           {classes.map((item) => <option key={item.class_id} value={item.class_id}>{item.name}</option>)}
         </select>
         <label className="sr-only" htmlFor="attendance-date">Attendance date</label>
@@ -248,7 +251,9 @@ export function TeacherClassAttendance() {
                             {status ? <StatusBadge status={status} /> : <span className="text-muted">Not recorded</span>}
                           </td>
                           <td className="py-3">
-                            {approval ? <ApprovalBadge approval={approval} /> : <span className="text-muted">—</span>}
+                            {approval
+                              ? <ApprovalBadge approval={approval} />
+                              : <span className="text-muted">{student.record_id ? 'Not required' : 'Not recorded'}</span>}
                           </td>
                           <td className="max-w-xs truncate py-3 text-muted" title={student.note ?? undefined}>{student.note || '—'}</td>
                           <td className="py-3">

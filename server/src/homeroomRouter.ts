@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from 'express'
+import path from 'node:path'
 import prisma from './db'
 import { requireAuth, requireRole } from './auth'
 import { getActivePeriod, getJakartaDate } from './services/academicPeriod'
@@ -10,6 +11,7 @@ const homeroomRouter = Router()
  */
 const VALID_APPROVAL_STATUSES = ['APPROVED', 'REJECTED'] as const
 type ApprovalStatus = (typeof VALID_APPROVAL_STATUSES)[number]
+const VALID_REQUEST_FILTERS = ['PENDING', 'APPROVED', 'REJECTED', 'NOT_REQUIRED'] as const
 
 /**
  * Helper to safely parse BigInt from string/number
@@ -145,8 +147,18 @@ homeroomRouter.get(
       }
       const assignedClassIds = assignments.map((assignment) => assignment.class_id)
 
-      // Filter by approval_status (default: PENDING)
-      const statusFilter = (req.query.status as string)?.trim().toUpperCase() || 'PENDING'
+      const rawStatusFilter = req.query.status
+      if (rawStatusFilter !== undefined && typeof rawStatusFilter !== 'string') {
+        return res.status(400).json({ message: 'Invalid status filter.' })
+      }
+      const statusFilter = typeof rawStatusFilter === 'string'
+        ? rawStatusFilter.trim().toUpperCase()
+        : 'PENDING'
+      if (!VALID_REQUEST_FILTERS.includes(statusFilter as (typeof VALID_REQUEST_FILTERS)[number])) {
+        return res.status(400).json({
+          message: `Invalid status filter. Allowed values: ${VALID_REQUEST_FILTERS.join(', ')}.`,
+        })
+      }
 
       // 2. Query attendance records
       const whereCondition: any = {
@@ -217,7 +229,8 @@ homeroomRouter.get(
         },
         attendance_status: record.status,
         note: record.note,
-        document_url: record.document_url,
+        has_evidence: Boolean(record.document_url),
+        evidence_filename: record.document_url ? path.basename(record.document_url) : null,
         approval_status: record.approval_status,
         approved_by: record.users?.username ?? null,
         approved_at: record.approved_at,
@@ -238,216 +251,126 @@ homeroomRouter.get(
   }
 )
 
-/**
- * PATCH /api/homeroom/attendance-requests/:recordId
- * Approve or reject an attendance permission/sick request.
- */
+async function reviewAttendanceRequest(req: Request, res: Response) {
+  try {
+    const sessionUser = req.user!
+    const body = req.body ?? {}
+    const recordId = parseBigIntSafe(
+      req.params.recordId ?? body.record_id ?? body.recordId ?? body.id
+    )
+    if (!recordId) {
+      return res.status(400).json({ message: 'Invalid or missing attendance record ID.' })
+    }
+
+    const rawStatus = req.method === 'POST'
+      ? req.path.endsWith('/approve') ? 'APPROVED' : 'REJECTED'
+      : (body.approval_status ?? body.status)?.toString().trim().toUpperCase()
+    if (!rawStatus || !VALID_APPROVAL_STATUSES.includes(rawStatus as ApprovalStatus)) {
+      return res.status(400).json({
+        message: `Invalid approval status. Allowed values: ${VALID_APPROVAL_STATUSES.join(', ')}.`,
+      })
+    }
+    const targetStatus = rawStatus as ApprovalStatus
+
+    const rawNote = body.note ?? body.notes
+    if (rawNote !== undefined && rawNote !== null && typeof rawNote !== 'string') {
+      return res.status(400).json({ message: 'Note must be text.' })
+    }
+    if (typeof rawNote === 'string' && rawNote.length > 500) {
+      return res.status(400).json({ message: 'Note must be 500 characters or fewer.' })
+    }
+    const optionalNote = typeof rawNote === 'string' ? rawNote.trim() : undefined
+
+    const record = await prisma.attendance_records.findUnique({
+      where: { attendance_record_id: recordId },
+      include: {
+        attendance_sessions: {
+          include: { classes: { select: { class_id: true, name: true } } },
+        },
+      },
+    })
+    if (!record) {
+      return res.status(404).json({ message: 'Attendance record not found.' })
+    }
+
+    const { period, assignments } = await getActiveHomeroomAssignments(sessionUser.userId)
+    const isAssignedClass = assignments.some(
+      (assignment) => assignment.class_id === record.attendance_sessions.class_id
+    )
+    if (!period || !isAssignedClass) {
+      return res.status(403).json({
+        message: `Forbidden. You are not assigned to class "${record.attendance_sessions.classes.name}" for the current academic period.`,
+      })
+    }
+    const attendanceDate = record.attendance_sessions.attendance_date
+    if (attendanceDate < period.start_date || attendanceDate > period.end_date) {
+      return res.status(404).json({ message: 'Attendance record not found.' })
+    }
+    if (record.approval_status !== 'PENDING') {
+      return res.status(409).json({ message: 'This attendance request has already been reviewed.' })
+    }
+
+    const updateData = {
+      approval_status: targetStatus,
+      approved_by: BigInt(sessionUser.userId),
+      approved_at: new Date(),
+      ...(optionalNote
+        ? { note: record.note ? `${record.note} (Homeroom Note: ${optionalNote})` : optionalNote }
+        : {}),
+    }
+    const updatedCount = await prisma.attendance_records.updateMany({
+      where: {
+        attendance_record_id: recordId,
+        approval_status: 'PENDING',
+      },
+      data: updateData,
+    })
+    if (updatedCount.count === 0) {
+      return res.status(409).json({ message: 'This attendance request has already been reviewed.' })
+    }
+
+    const updatedRecord = await prisma.attendance_records.findUniqueOrThrow({
+      where: { attendance_record_id: recordId },
+      include: {
+        students: { select: { name: true, nis: true } },
+        attendance_sessions: { include: { classes: { select: { name: true } } } },
+        users: { select: { username: true } },
+      },
+    })
+
+    return res.status(200).json({
+      message: `Attendance request for student "${updatedRecord.students.name}" has been ${targetStatus.toLowerCase()}.`,
+      data: {
+        record_id: updatedRecord.attendance_record_id.toString(),
+        session_id: updatedRecord.attendance_session_id.toString(),
+        class_name: updatedRecord.attendance_sessions.classes.name,
+        student_name: updatedRecord.students.name,
+        student_nis: updatedRecord.students.nis,
+        attendance_status: updatedRecord.status,
+        approval_status: updatedRecord.approval_status,
+        note: updatedRecord.note,
+        approved_by: updatedRecord.users?.username ?? sessionUser.username,
+        approved_at: updatedRecord.approved_at,
+      },
+    })
+  } catch (error) {
+    console.error('Failed to review attendance request:', error)
+    return res.status(500).json({ message: 'Internal server error while reviewing attendance request.' })
+  }
+}
+
 homeroomRouter.patch(
   ['/attendance-requests/:recordId', '/requests/:recordId', '/:recordId'],
   requireAuth,
   requireRole('teacher'),
-  async (req: Request, res: Response) => {
-    try {
-      const sessionUser = req.user!
-      const recordId = parseBigIntSafe(req.params.recordId)
-
-      if (!recordId) {
-        return res.status(400).json({
-          message: 'Invalid record ID parameter.',
-        })
-      }
-
-      const { status, approval_status, note, notes } = req.body
-
-      // Normalize requested status: accept either 'status' or 'approval_status'
-      const rawStatus = (approval_status ?? status)?.toString().trim().toUpperCase()
-
-      if (!rawStatus || !VALID_APPROVAL_STATUSES.includes(rawStatus as ApprovalStatus)) {
-        return res.status(400).json({
-          message: `Invalid approval status. Allowed values are: ${VALID_APPROVAL_STATUSES.join(', ')}.`,
-        })
-      }
-
-      const targetStatus: ApprovalStatus = rawStatus as ApprovalStatus
-      const optionalNote: string | undefined = typeof (note ?? notes) === 'string' ? (note ?? notes).trim() : undefined
-
-      // 1. Fetch the attendance record with its session and class info
-      const record = await prisma.attendance_records.findUnique({
-        where: { attendance_record_id: recordId },
-        include: {
-          attendance_sessions: {
-            include: {
-              classes: { select: { class_id: true, name: true } },
-            },
-          },
-          students: { select: { student_id: true, name: true } },
-        },
-      })
-
-      if (!record) {
-        return res.status(404).json({
-          message: `Attendance request with ID ${recordId.toString()} not found.`,
-        })
-      }
-
-      // 2. Strict Homeroom Authorization Check
-      // Verify that the logged-in user is the homeroom teacher of the student's class
-      const { assignments } = await getActiveHomeroomAssignments(sessionUser.userId)
-      const isAssignedClass = assignments.some(
-        (assignment) => assignment.class_id === record.attendance_sessions.class_id
-      )
-      if (!isAssignedClass) {
-        return res.status(403).json({
-          message: `Forbidden. You are not assigned to class "${record.attendance_sessions.classes.name}" for the current academic period.`,
-        })
-      }
-
-      // 3. Update attendance record approval status
-      const updateData: any = {
-        approval_status: targetStatus,
-        approved_by: BigInt(sessionUser.userId),
-        approved_at: new Date(),
-      }
-
-      // If homeroom teacher provided feedback notes, append or update note
-      if (optionalNote !== undefined && optionalNote !== '') {
-        updateData.note = record.note
-          ? `${record.note} (Homeroom Note: ${optionalNote})`
-          : optionalNote
-      }
-
-      const updatedRecord = await prisma.attendance_records.update({
-        where: { attendance_record_id: recordId },
-        data: updateData,
-        include: {
-          students: { select: { name: true, nis: true } },
-          attendance_sessions: {
-            include: { classes: { select: { name: true } } },
-          },
-          users: { select: { username: true } },
-        },
-      })
-
-      return res.status(200).json({
-        message: `Attendance request for student "${updatedRecord.students.name}" has been ${targetStatus.toLowerCase()}.`,
-        data: {
-          record_id: updatedRecord.attendance_record_id.toString(),
-          session_id: updatedRecord.attendance_session_id.toString(),
-          class_name: updatedRecord.attendance_sessions.classes.name,
-          student_name: updatedRecord.students.name,
-          student_nis: updatedRecord.students.nis,
-          attendance_status: updatedRecord.status,
-          approval_status: updatedRecord.approval_status,
-          note: updatedRecord.note,
-          approved_by: updatedRecord.users?.username ?? sessionUser.username,
-          approved_at: updatedRecord.approved_at,
-        },
-      })
-    } catch (error) {
-      console.error('Failed to update attendance request:', error)
-      return res.status(500).json({
-        message: 'Internal server error while updating attendance request.',
-      })
-    }
-  }
+  reviewAttendanceRequest
 )
 
 homeroomRouter.post(
   ['/approve', '/reject'],
   requireAuth,
   requireRole('teacher'),
-  async (req: Request, res: Response) => {
-    try {
-      const sessionUser = req.user!
-      const recordId = parseBigIntSafe(req.body.record_id ?? req.body.recordId ?? req.body.id)
-
-      if (!recordId) {
-        return res.status(400).json({
-          message: 'Invalid or missing record ID in request body.',
-        })
-      }
-
-      const isApprove = req.path.endsWith('approve')
-      const targetStatus: ApprovalStatus = isApprove ? 'APPROVED' : 'REJECTED'
-      const optionalNote: string | undefined =
-        typeof (req.body.note ?? req.body.notes) === 'string'
-          ? (req.body.note ?? req.body.notes).trim()
-          : undefined
-
-      const record = await prisma.attendance_records.findUnique({
-        where: { attendance_record_id: recordId },
-        include: {
-          attendance_sessions: {
-            include: {
-              classes: { select: { class_id: true, name: true } },
-            },
-          },
-          students: { select: { student_id: true, name: true } },
-        },
-      })
-
-      if (!record) {
-        return res.status(404).json({
-          message: `Attendance request with ID ${recordId.toString()} not found.`,
-        })
-      }
-
-      const { assignments } = await getActiveHomeroomAssignments(sessionUser.userId)
-      const isAssignedClass = assignments.some(
-        (assignment) => assignment.class_id === record.attendance_sessions.class_id
-      )
-      if (!isAssignedClass) {
-        return res.status(403).json({
-          message: `Forbidden. You are not assigned to class "${record.attendance_sessions.classes.name}" for the current academic period.`,
-        })
-      }
-
-      const updateData: any = {
-        approval_status: targetStatus,
-        approved_by: BigInt(sessionUser.userId),
-        approved_at: new Date(),
-      }
-
-      if (optionalNote !== undefined && optionalNote !== '') {
-        updateData.note = record.note
-          ? `${record.note} (Homeroom Note: ${optionalNote})`
-          : optionalNote
-      }
-
-      const updatedRecord = await prisma.attendance_records.update({
-        where: { attendance_record_id: recordId },
-        data: updateData,
-        include: {
-          students: { select: { name: true, nis: true } },
-          attendance_sessions: {
-            include: { classes: { select: { name: true } } },
-          },
-          users: { select: { username: true } },
-        },
-      })
-
-      return res.status(200).json({
-        message: `Attendance request for student "${updatedRecord.students.name}" has been ${targetStatus.toLowerCase()}.`,
-        data: {
-          record_id: updatedRecord.attendance_record_id.toString(),
-          session_id: updatedRecord.attendance_session_id.toString(),
-          class_name: updatedRecord.attendance_sessions.classes.name,
-          student_name: updatedRecord.students.name,
-          student_nis: updatedRecord.students.nis,
-          attendance_status: updatedRecord.status,
-          approval_status: updatedRecord.approval_status,
-          note: updatedRecord.note,
-          approved_by: updatedRecord.users?.username ?? sessionUser.username,
-          approved_at: updatedRecord.approved_at,
-        },
-      })
-    } catch (error) {
-      console.error('Failed to update attendance request via POST:', error)
-      return res.status(500).json({
-        message: 'Internal server error while updating attendance request.',
-      })
-    }
-  }
+  reviewAttendanceRequest
 )
 
 export default homeroomRouter
