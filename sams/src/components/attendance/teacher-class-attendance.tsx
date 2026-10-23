@@ -26,10 +26,10 @@ function jakartaToday() {
 }
 
 function toAttendanceStatus(status: string): AttendanceStatus | null {
-  if (status === 'PRESENT') return 'hadir'
-  if (status === 'PERMITTED') return 'izin'
-  if (status === 'SICK') return 'sakit'
-  if (status === 'ABSENT') return 'alfa'
+  if (status === 'PRESENT') return 'present'
+  if (status === 'PERMITTED') return 'permitted'
+  if (status === 'SICK') return 'sick'
+  if (status === 'ABSENT') return 'absent'
   return null
 }
 

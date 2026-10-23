@@ -505,7 +505,7 @@ export async function getAttendanceHistory(
         data: {
           student_id: studentId.toString(),
           history: [],
-          recap: { hadir: 0, izin: 0, sakit: 0, alfa: 0 },
+          recap: { present: 0, permitted: 0, sick: 0, absent: 0 },
         },
       })
     }
@@ -530,7 +530,7 @@ export async function getAttendanceHistory(
         data: {
           student_id: studentId.toString(),
           history: [],
-          recap: { hadir: 0, izin: 0, sakit: 0, alfa: 0 },
+          recap: { present: 0, permitted: 0, sick: 0, absent: 0 },
         },
       })
     }
@@ -560,17 +560,17 @@ export async function getAttendanceHistory(
     take: 50,
   })
 
-  const recap = { hadir: 0, izin: 0, sakit: 0, alfa: 0 }
+  const recap = { present: 0, permitted: 0, sick: 0, absent: 0 }
   const history = records.map((record) => {
     const date = record.attendance_sessions.attendance_date
     const rawDate = date.toISOString().slice(0, 10)
     const status = record.status === 'PERMITTED'
-      ? 'izin'
+      ? 'permitted'
       : record.status === 'SICK'
-        ? 'sakit'
+        ? 'sick'
         : record.status === 'ABSENT'
-          ? 'alfa'
-          : 'hadir'
+          ? 'absent'
+          : 'present'
     const approval = record.approval_status === 'PENDING'
       ? 'pending'
       : record.approval_status === 'REJECTED'

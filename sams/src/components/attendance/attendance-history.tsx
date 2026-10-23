@@ -61,7 +61,7 @@ export function AttendanceHistory({ studentId }: { studentId?: string }) {
             <li key={h.id || h.date} className="flex flex-wrap items-center gap-3 py-3">
               <span className="w-24 text-sm font-medium text-ink">{h.date}</span>
               <StatusBadge status={h.status} />
-              {h.status !== 'hadir' && <ApprovalBadge approval={h.approval} />}
+              {h.status !== 'present' && <ApprovalBadge approval={h.approval} />}
               {h.note && <span className="text-sm text-muted">{h.note}</span>}
             </li>
           ))}

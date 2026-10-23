@@ -2,6 +2,7 @@ import axios, { type AxiosError, type AxiosRequestConfig } from 'axios'
 
 export interface ApiErrorResponse {
   status: number
+  code?: string
   message: string
   errors?: Record<string, string[]> | unknown
 }
@@ -28,26 +29,70 @@ apiClient.interceptors.request.use((config) => {
 // Helper for standardized global error handling
 export function parseApiError(err: unknown): ApiErrorResponse {
   if (axios.isAxiosError(err)) {
-    const error = err as AxiosError<{ message?: string; error?: string; errors?: unknown }>
+    const error = err as AxiosError<{ message?: string; error?: string; code?: string; errors?: unknown }>
     const status = error.response?.status ?? 0
-
-    if (status === 401) {
-      return { status, message: 'Session expired or invalid credentials. Please log in again.' }
-    }
-    if (status === 403) {
-      return { status, message: 'You do not have permission to perform this action.' }
-    }
-    if (status >= 500) {
-      return { status, message: 'A server error occurred. Please try again later.' }
-    }
-    if (status === 0) {
-      return { status, message: 'Failed to connect to server. Check your network connection.' }
-    }
-
     const data = error.response?.data
     const serverMessage = data?.message || data?.error
+    const code = data?.code
+
+    // Network error / no response
+    if (status === 0 || !error.response) {
+      return {
+        status: 0,
+        code: 'NETWORK_ERROR',
+        message: 'Unable to reach the server. Please check your internet connection.',
+      }
+    }
+
+    // 400 Bad Request / Validation error
+    if (status === 400) {
+      return {
+        status: 400,
+        code: code || 'VALIDATION_ERROR',
+        message: typeof serverMessage === 'string' ? serverMessage : 'Please check your input and try again.',
+        errors: data?.errors,
+      }
+    }
+
+    // 401 Unauthorized / Invalid credentials
+    if (status === 401) {
+      return {
+        status: 401,
+        code: code || 'INVALID_CREDENTIALS',
+        message: typeof serverMessage === 'string' ? serverMessage : 'Incorrect username or password.',
+      }
+    }
+
+    // 429 Too Many Requests
+    if (status === 429) {
+      return {
+        status: 429,
+        code: code || 'TOO_MANY_ATTEMPTS',
+        message: typeof serverMessage === 'string' ? serverMessage : 'Too many attempts. Please try again in a moment.',
+      }
+    }
+
+    // 403 Forbidden
+    if (status === 403) {
+      return {
+        status: 403,
+        code: code || 'FORBIDDEN',
+        message: typeof serverMessage === 'string' ? serverMessage : 'You do not have permission to perform this action.',
+      }
+    }
+
+    // 5xx Server Error
+    if (status >= 500) {
+      return {
+        status,
+        code: code || 'SERVER_ERROR',
+        message: 'Something went wrong on the server. Please try again.',
+      }
+    }
+
     return {
       status,
+      code,
       message: typeof serverMessage === 'string' ? serverMessage : 'Invalid request.',
       errors: data?.errors,
     }

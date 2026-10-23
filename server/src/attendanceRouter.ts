@@ -148,23 +148,23 @@ attendanceRouter.get(
       )
       const weekly = WEEKDAYS.map((day) => ({
         day,
-        hadir: 0,
-        izin: 0,
-        sakit: 0,
-        alfa: 0,
+        present: 0,
+        permitted: 0,
+        sick: 0,
+        absent: 0,
       }))
 
       for (const session of sessions) {
         const index = (session.attendance_date.getUTCDay() + 6) % 7
         for (const record of session.attendance_records) {
           if (record.approval_status === 'REJECTED' || record.status === 'ABSENT') {
-            weekly[index]!.alfa++
+            weekly[index]!.absent++
           } else if (record.status === 'PRESENT') {
-            weekly[index]!.hadir++
+            weekly[index]!.present++
           } else if (record.status === 'PERMITTED') {
-            weekly[index]!.izin++
+            weekly[index]!.permitted++
           } else if (record.status === 'SICK') {
-            weekly[index]!.sakit++
+            weekly[index]!.sick++
           }
         }
       }

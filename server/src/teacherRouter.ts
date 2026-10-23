@@ -314,7 +314,7 @@ teacherRouter.get('/attendance-weekly', requireAuth, async (req: Request, res: R
       include: {
         classes: { select: { name: true } },
         attendance_records: {
-          select: { status: true },
+          select: { status: true, approval_status: true },
         },
       },
       orderBy: { attendance_date: 'asc' },
@@ -330,8 +330,19 @@ teacherRouter.get('/attendance-weekly', requireAuth, async (req: Request, res: R
       if (dayIndex < 1 || dayIndex > 5) continue
 
       for (const record of session.attendance_records) {
-        const status = (record.status || '').toLowerCase()
-        if (status === 'hadir' || status === 'izin' || status === 'sakit' || status === 'alfa') {
+        const rawStatus = (record.status || '').toUpperCase()
+        let status: 'present' | 'permitted' | 'sick' | 'absent' | null = null
+        if (record.approval_status === 'REJECTED' || rawStatus === 'ABSENT') {
+          status = 'absent'
+        } else if (rawStatus === 'PRESENT') {
+          status = 'present'
+        } else if (rawStatus === 'PERMITTED') {
+          status = 'permitted'
+        } else if (rawStatus === 'SICK') {
+          status = 'sick'
+        }
+
+        if (status) {
           weekly[dayIndex - 1][status]++
         }
       }
@@ -361,11 +372,11 @@ teacherRouter.get('/attendance-weekly', requireAuth, async (req: Request, res: R
 // Helper: build empty week structure
 function buildEmptyWeek() {
   return [
-    { day: 'Mon', hadir: 0, izin: 0, sakit: 0, alfa: 0 },
-    { day: 'Tue', hadir: 0, izin: 0, sakit: 0, alfa: 0 },
-    { day: 'Wed', hadir: 0, izin: 0, sakit: 0, alfa: 0 },
-    { day: 'Thu', hadir: 0, izin: 0, sakit: 0, alfa: 0 },
-    { day: 'Fri', hadir: 0, izin: 0, sakit: 0, alfa: 0 },
+    { day: 'Mon', present: 0, permitted: 0, sick: 0, absent: 0 },
+    { day: 'Tue', present: 0, permitted: 0, sick: 0, absent: 0 },
+    { day: 'Wed', present: 0, permitted: 0, sick: 0, absent: 0 },
+    { day: 'Thu', present: 0, permitted: 0, sick: 0, absent: 0 },
+    { day: 'Fri', present: 0, permitted: 0, sick: 0, absent: 0 },
   ]
 }
 

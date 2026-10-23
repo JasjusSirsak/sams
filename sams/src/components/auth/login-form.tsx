@@ -50,9 +50,13 @@ export function LoginForm() {
 
   function handleChange(field: keyof FormValues, value: string) {
     setValues((prev) => ({ ...prev, [field]: value }))
-    // clear field error as user re-types
-    if (errors[field]) setErrors((prev) => ({ ...prev, [field]: undefined }))
-    if (formError) setFormError('')
+    // Clear both field and general form errors when user starts typing again
+    if (errors[field]) {
+      setErrors((prev) => ({ ...prev, [field]: undefined }))
+    }
+    if (formError) {
+      setFormError('')
+    }
   }
 
   function handleBlur(field: keyof FormValues) {
@@ -79,7 +83,23 @@ export function LoginForm() {
       })
       router.replace('/')
     } catch (err) {
-      setFormError((err as ApiErrorResponse).message || 'Login failed. Please try again.')
+      const apiErr = err as ApiErrorResponse
+      if (apiErr.code === 'VALIDATION_ERROR' && apiErr.errors && typeof apiErr.errors === 'object') {
+        const fieldErrs = apiErr.errors as Record<string, string[] | string>
+        const mappedErrors: FieldErrors = {}
+        if (fieldErrs.identity || fieldErrs.username) {
+          const val = fieldErrs.identity || fieldErrs.username
+          mappedErrors.identity = Array.isArray(val) ? val[0] : String(val)
+        }
+        if (fieldErrs.password) {
+          const val = fieldErrs.password
+          mappedErrors.password = Array.isArray(val) ? val[0] : String(val)
+        }
+        if (Object.keys(mappedErrors).length > 0) {
+          setErrors((prev) => ({ ...prev, ...mappedErrors }))
+        }
+      }
+      setFormError(apiErr.message || 'Login failed. Please try again.')
     } finally {
       setSubmitting(false)
     }
@@ -90,7 +110,8 @@ export function LoginForm() {
       {formError && (
         <div
           role="alert"
-          className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+          aria-live="polite"
+          className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 font-medium"
         >
           {formError}
         </div>

@@ -7,7 +7,7 @@ import { getTodayAttendance, submitAttendance, type TodayAttendanceRecord } from
 import { cn } from '@/lib/helpers'
 import { ApprovalBadge, Card, CardLabel, Skeleton, Spinner, STATUS_META, StatusBadge, buttonPrimary, buttonSecondary, inputClass } from '@/components/ui-kit'
 
-type AttendanceStatus = 'hadir' | 'izin' | 'sakit' | 'alfa'
+type AttendanceStatus = 'present' | 'permitted' | 'sick' | 'absent'
 type ApprovalStatus = 'approved' | 'pending' | 'rejected'
 
 type TodayViewRecord = {
@@ -18,17 +18,17 @@ type TodayViewRecord = {
   time: string
 }
 
-const OPTIONS: AttendanceStatus[] = ['hadir', 'izin', 'sakit']
+const OPTIONS: AttendanceStatus[] = ['present', 'permitted', 'sick']
 const MAX_FILE_MB = 2
 const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png']
 
 function toTodayViewRecord(record: TodayAttendanceRecord): TodayViewRecord {
   const statusMap: Record<string, AttendanceStatus> = {
-    PRESENT: 'hadir',
-    SICK: 'sakit',
-    PERMITTED: 'izin',
-    PERMISSION: 'izin',
-    ABSENT: 'alfa',
+    PRESENT: 'present',
+    SICK: 'sick',
+    PERMITTED: 'permitted',
+    PERMISSION: 'permitted',
+    ABSENT: 'absent',
   }
   const approvalMap: Record<string, ApprovalStatus> = {
     NOT_REQUIRED: 'approved',
@@ -77,7 +77,7 @@ export function TodayAttendance() {
   const [file, setFile] = useState<File | null>(null)
   const [submitError, setSubmitError] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const needsEvidence = status === 'izin' || status === 'sakit'
+  const needsEvidence = status === 'permitted' || status === 'sick'
 
   useEffect(() => {
     let isActive = true
@@ -138,7 +138,7 @@ export function TodayAttendance() {
         }
       }
 
-      const serverStatus = status === 'hadir' ? 'PRESENT' : status === 'sakit' ? 'SICK' : 'PERMITTED'
+      const serverStatus = status === 'present' ? 'PRESENT' : status === 'sick' ? 'SICK' : 'PERMITTED'
       const response = await submitAttendance({
         status: serverStatus,
         note: needsEvidence ? note.trim() : undefined,
@@ -223,7 +223,7 @@ export function TodayAttendance() {
         )}
         {today.approval === 'approved' && (
           <p className="mt-4 rounded-xl bg-success/10 p-3 text-sm text-ink">
-            {today.status === 'hadir' ? "You're checked in. Have a great day at school!" : 'Your request was approved by your homeroom teacher.'}
+            {today.status === 'present' ? "You're checked in. Have a great day at school!" : 'Your request was approved by your homeroom teacher.'}
           </p>
         )}
         {today.approval === 'rejected' && (
@@ -305,7 +305,7 @@ export function TodayAttendance() {
                 rows={3}
                 value={note}
                 onChange={(event) => setNote(event.target.value)}
-                placeholder={status === 'sakit' ? 'e.g. Fever, visited the doctor' : 'e.g. Family event'}
+                placeholder={status === 'sick' ? 'e.g. Fever, visited the doctor' : 'e.g. Family event'}
                 className={inputClass}
               />
             </div>

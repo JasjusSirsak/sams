@@ -55,10 +55,10 @@ export function Pill({ children, className }: { children: ReactNode; className?:
 }
 
 export const STATUS_META: Record<AttendanceStatus, { label: string; hint: string; icon: typeof CircleCheck; className: string; color: string }> = {
-  hadir: { label: 'Present', hint: "I'm at school", icon: CircleCheck, className: 'bg-success/15 text-success', color: 'var(--success)' },
-  izin: { label: 'Permission', hint: 'Permission, letter required', icon: FileText, className: 'bg-info/15 text-info', color: 'var(--info)' },
-  sakit: { label: 'Sick', hint: 'Sick, evidence required', icon: HeartPulse, className: 'bg-warning/15 text-warning', color: 'var(--warning)' },
-  alfa: { label: 'Absent', hint: 'Absent without notice', icon: CircleX, className: 'bg-danger/15 text-danger', color: 'var(--danger)' },
+  present: { label: 'Present', hint: "I'm at school", icon: CircleCheck, className: 'bg-success/15 text-success', color: 'var(--success)' },
+  permitted: { label: 'Permission', hint: 'Permission, letter required', icon: FileText, className: 'bg-info/15 text-info', color: 'var(--info)' },
+  sick: { label: 'Sick', hint: 'Sick, evidence required', icon: HeartPulse, className: 'bg-warning/15 text-warning', color: 'var(--warning)' },
+  absent: { label: 'Absent', hint: 'Absent without notice', icon: CircleX, className: 'bg-danger/15 text-danger', color: 'var(--danger)' },
 }
 
 export function StatusBadge({ status }: { status: AttendanceStatus }) {

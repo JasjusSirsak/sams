@@ -41,7 +41,11 @@ app.use(cookieParser())
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 10, // Maximum 10 attempts per IP
-  message: { message: 'Too many login attempts. Please try again in 15 minutes.' },
+  message: {
+    success: false,
+    code: 'TOO_MANY_ATTEMPTS',
+    message: 'Too many attempts. Please try again in a moment.',
+  },
   standardHeaders: true,
   legacyHeaders: false,
   validate: {
@@ -210,13 +214,11 @@ const errorHandler: ErrorRequestHandler = (error, _req, res, next) => {
   }
 
   console.error('Unhandled request error:', error)
-  const isProduction = process.env.NODE_ENV === 'production'
-  const details = error instanceof Error ? error : new Error('Internal server error.')
-  return res.status(500).json(
-    isProduction
-      ? { message: 'Internal server error.' }
-      : { message: details.message, stack: details.stack }
-  )
+  return res.status(500).json({
+    success: false,
+    code: 'SERVER_ERROR',
+    message: 'Something went wrong on the server. Please try again.',
+  })
 }
 app.use(errorHandler)
 

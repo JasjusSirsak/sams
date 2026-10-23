@@ -105,13 +105,13 @@ export function ApprovalList({ limit, showReviewed = false }: { limit?: number; 
                 month: 'short',
               })
 
-          const statusMapped: AttendanceStatus = r.attendance_status === 'SICK' ? 'sakit' : 'izin'
+          const statusMapped: AttendanceStatus = r.attendance_status === 'SICK' ? 'sick' : 'permitted'
 
           return {
             id: r.id || r.record_id,
             student: r.student?.name || 'Unknown Student',
             nis: r.student?.nis || '-',
-            status: statusMapped as 'izin' | 'sakit',
+            status: statusMapped as 'permitted' | 'sick',
             date: dateFormatted,
             note: r.note || '',
             hasEvidence: r.has_evidence,
@@ -269,7 +269,7 @@ export function ApprovalList({ limit, showReviewed = false }: { limit?: number; 
                   ) : (
                     <>
                       <Pill className="bg-danger/15 text-danger">Rejected</Pill>
-                      <StatusBadge status="alfa" />
+                      <StatusBadge status="absent" />
                     </>
                   )}
                 </li>

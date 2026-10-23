@@ -121,7 +121,7 @@ export async function getGradesByClassAndSubject(classId: string, subjectId: str
   return response.data.data
 }
 
-export type ApiAttendanceStatus = 'hadir' | 'izin' | 'sakit' | 'alfa'
+export type ApiAttendanceStatus = 'present' | 'permitted' | 'sick' | 'absent'
 export type ApiApprovalStatus = 'approved' | 'pending' | 'rejected'
 
 export interface AttendanceHistoryRecord {
@@ -135,10 +135,10 @@ export interface AttendanceHistoryRecord {
 }
 
 export interface AttendanceRecapData {
-  hadir: number
-  izin: number
-  sakit: number
-  alfa: number
+  present: number
+  permitted: number
+  sick: number
+  absent: number
 }
 
 export interface AttendanceResponse {
@@ -327,10 +327,10 @@ export async function getTeacherClasses(): Promise<TeacherClassItem[]> {
 
 export type TeacherWeeklyAttendanceDay = {
   day: string
-  hadir: number
-  izin: number
-  sakit: number
-  alfa: number
+  present: number
+  permitted: number
+  sick: number
+  absent: number
 }
 
 export type TeacherWeeklyAttendance = {

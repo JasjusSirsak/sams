@@ -94,6 +94,10 @@ async function buildAuthenticatedProfile(user: Parameters<typeof buildUserProfil
   }
 }
 
+// Dummy hash for constant-time comparison when user does not exist
+// Pre-computed Argon2id hash of a random dummy string to prevent timing side-channel attacks
+const DUMMY_HASH = '$argon2id$v=19$m=65536,t=3,p=4$dHVtbXlzYWx0c3RyaW5n$1a9p9Xz3r+hLqYvK6Qn4iC8H7aXzQ2r8/xLmNoPqRsT'
+
 /**
  * POST /api/auth/login
  * Verify username/email & password, check active status, and set HttpOnly cookie
@@ -103,11 +107,13 @@ authRouter.post('/login', async (req: Request, res: Response) => {
     const { identity, username, password } = req.body
 
     const loginIdentifier = (identity || username || '').trim()
-    const rawPassword = password || ''
+    const rawPassword = typeof password === 'string' ? password : ''
 
     if (!loginIdentifier || !rawPassword) {
       return res.status(400).json({
-        message: 'Username/email and password are required.',
+        success: false,
+        code: 'VALIDATION_ERROR',
+        message: 'Username or email and password are required.',
       })
     }
 
@@ -138,30 +144,33 @@ authRouter.post('/login', async (req: Request, res: Response) => {
       },
     })
 
-    if (!user) {
+    // If user is not found, verify against dummy hash to ensure constant-time response (timing attack mitigation)
+    const targetHash = user?.password_hash || DUMMY_HASH
+    let isMatch = false
+    try {
+      isMatch = await argon2.verify(targetHash, rawPassword)
+    } catch (err) {
+      console.error('Password verification failure:', err)
+      isMatch = false
+    }
+
+    // User enumeration prevention: identical status & body for not found or wrong password
+    if (!user || !isMatch) {
       return res.status(401).json({
-        message: 'Invalid credentials. Incorrect username or password.',
+        success: false,
+        code: 'INVALID_CREDENTIALS',
+        message: 'Incorrect username or password.',
       })
     }
 
-    // Check account status
+    // Check account status - safe message without leaking internal details
     if (!user.is_active) {
-      return res.status(403).json({
-        message: 'Your account has been deactivated. Please contact an administrator.',
+      return res.status(401).json({
+        success: false,
+        code: 'INVALID_CREDENTIALS',
+        message: 'Incorrect username or password.',
       })
     }
-
-let isMatch = false
-try {
-  isMatch = await argon2.verify(user.password_hash, rawPassword)
-} catch (err) {
-  console.error('Invalid password hash format for user:', user.username, err)
-}
-    if (!isMatch) {
-  return res.status(401).json({
-    message: 'Invalid credentials. Incorrect username or password.',
-  })
-}
 
     // Prepare user profile
     const profile = await buildAuthenticatedProfile(user)
@@ -180,6 +189,7 @@ try {
     // Token is also included in body for the frontend Bearer-token interceptor
     // The HttpOnly cookie remains the primary auth mechanism
     return res.status(200).json({
+      success: true,
       message: 'Login successful.',
       token,
       user: profile,
@@ -187,7 +197,9 @@ try {
   } catch (error) {
     console.error('Error during login:', error)
     return res.status(500).json({
-      message: 'Internal server error while processing login.',
+      success: false,
+      code: 'SERVER_ERROR',
+      message: 'Something went wrong on the server. Please try again.',
     })
   }
 })

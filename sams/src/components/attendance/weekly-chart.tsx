@@ -4,7 +4,7 @@ import { getTeacherWeeklyAttendance, type TeacherWeeklyAttendanceDay } from '@/l
 import type { AttendanceStatus } from '@/lib/data'
 import { Card, CardLabel, Skeleton, STATUS_META } from '@/components/ui-kit'
 
-const ORDER: AttendanceStatus[] = ['hadir', 'izin', 'sakit', 'alfa']
+const ORDER: AttendanceStatus[] = ['present', 'permitted', 'sick', 'absent']
 
 export function WeeklyChart({
   className,
@@ -45,7 +45,7 @@ export function WeeklyChart({
   const displayedWeekly = weeklyData ?? weekly
   const displayedClassName = classLabel ?? classNameLabel
   const displayedLoading = weeklyData === undefined ? loading : (isLoading ?? false)
-  const totalAllWeek = displayedWeekly.reduce((acc, d) => acc + d.hadir + d.izin + d.sakit + d.alfa, 0)
+  const totalAllWeek = displayedWeekly.reduce((acc, d) => acc + d.present + d.permitted + d.sick + d.absent, 0)
 
   return (
     <Card className={className}>

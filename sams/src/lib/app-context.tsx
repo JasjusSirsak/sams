@@ -114,7 +114,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const dateFormatted = isNaN(dateObj.getTime())
             ? r.date
             : dateObj.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })
-          const statusMapped = r.attendance_status === 'SICK' ? 'sakit' : 'izin'
+          const statusMapped = r.attendance_status === 'SICK' ? 'sick' : 'permitted'
 
           return {
             id: r.id || r.record_id,

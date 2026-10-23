@@ -4,7 +4,7 @@ import { getAttendance, type AttendanceRecapData } from '@/lib/api'
 import type { AttendanceStatus } from '@/lib/data'
 import { Card, CardLabel, Skeleton, STATUS_META } from '@/components/ui-kit'
 
-const ORDER: AttendanceStatus[] = ['hadir', 'izin', 'sakit', 'alfa']
+const ORDER: AttendanceStatus[] = ['present', 'permitted', 'sick', 'absent']
 
 export function AttendanceRecap({ studentId }: { studentId?: string }) {
   const [recap, setRecap] = useState<AttendanceRecapData | null>(null)
@@ -16,7 +16,7 @@ export function AttendanceRecap({ studentId }: { studentId?: string }) {
     setError(null)
     getAttendance(studentId)
       .then((res) => {
-        setRecap(res?.recap || { hadir: 0, izin: 0, sakit: 0, alfa: 0 })
+        setRecap(res?.recap || { present: 0, permitted: 0, sick: 0, absent: 0 })
         setLoading(false)
       })
       .catch((err) => {
@@ -30,7 +30,7 @@ export function AttendanceRecap({ studentId }: { studentId?: string }) {
   }, [studentId])
 
   const total = recap ? ORDER.reduce((sum, s) => sum + (recap[s] || 0), 0) : 0
-  const rate = total > 0 && recap ? Math.round(((recap.hadir || 0) / total) * 100) : 0
+  const rate = total > 0 && recap ? Math.round(((recap.present || 0) / total) * 100) : 0
 
   let start = 0
   const stops = recap && total > 0

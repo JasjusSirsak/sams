@@ -1,7 +1,7 @@
 // All mock data lives here. Replace these with real API calls later (see lib/api.ts).
 
 export type Role = 'student' | 'parent' | 'teacher' | 'admin' | 'staff'
-export type AttendanceStatus = 'hadir' | 'izin' | 'sakit' | 'alfa'
+export type AttendanceStatus = 'present' | 'permitted' | 'sick' | 'absent'
 export type Approval = 'approved' | 'pending' | 'rejected'
 export type AgendaCategory = 'school' | 'academic' | 'assignment' | 'meeting' | 'exam'
 
@@ -54,26 +54,26 @@ export const SUBJECT_GRADES: Record<string, SubjectGrade[]> = {
 }
 
 export const ATTENDANCE_RECAP: Record<string, Record<AttendanceStatus, number>> = {
-  raka: { hadir: 52, izin: 2, sakit: 1, alfa: 0 },
-  nadia: { hadir: 49, izin: 1, sakit: 3, alfa: 2 },
+  raka: { present: 52, permitted: 2, sick: 1, absent: 0 },
+  nadia: { present: 49, permitted: 1, sick: 3, absent: 2 },
 }
 
 export type HistoryItem = { date: string; status: AttendanceStatus; approval: Approval; note?: string }
 
 export const ATTENDANCE_HISTORY: Record<string, HistoryItem[]> = {
   raka: [
-    { date: 'Tue, 6 Oct', status: 'hadir', approval: 'approved' },
-    { date: 'Mon, 5 Oct', status: 'hadir', approval: 'approved' },
-    { date: 'Fri, 2 Oct', status: 'izin', approval: 'approved', note: 'Family event' },
-    { date: 'Thu, 1 Oct', status: 'hadir', approval: 'approved' },
-    { date: 'Wed, 30 Sep', status: 'sakit', approval: 'approved', note: 'Fever' },
+    { date: 'Tue, 6 Oct', status: 'present', approval: 'approved' },
+    { date: 'Mon, 5 Oct', status: 'present', approval: 'approved' },
+    { date: 'Fri, 2 Oct', status: 'permitted', approval: 'approved', note: 'Family event' },
+    { date: 'Thu, 1 Oct', status: 'present', approval: 'approved' },
+    { date: 'Wed, 30 Sep', status: 'sick', approval: 'approved', note: 'Fever' },
   ],
   nadia: [
-    { date: 'Tue, 6 Oct', status: 'sakit', approval: 'pending', note: 'Flu, doctor letter' },
-    { date: 'Mon, 5 Oct', status: 'hadir', approval: 'approved' },
-    { date: 'Fri, 2 Oct', status: 'alfa', approval: 'rejected', note: 'No evidence provided' },
-    { date: 'Thu, 1 Oct', status: 'hadir', approval: 'approved' },
-    { date: 'Wed, 30 Sep', status: 'hadir', approval: 'approved' },
+    { date: 'Tue, 6 Oct', status: 'sick', approval: 'pending', note: 'Flu, doctor letter' },
+    { date: 'Mon, 5 Oct', status: 'present', approval: 'approved' },
+    { date: 'Fri, 2 Oct', status: 'absent', approval: 'rejected', note: 'No evidence provided' },
+    { date: 'Thu, 1 Oct', status: 'present', approval: 'approved' },
+    { date: 'Wed, 30 Sep', status: 'present', approval: 'approved' },
   ],
 }
 
@@ -104,11 +104,11 @@ export const TEACHER_CLASSES = [
 ]
 
 export const WEEKLY_ATTENDANCE = [
-  { day: 'Mon', hadir: 30, izin: 1, sakit: 1, alfa: 0 },
-  { day: 'Tue', hadir: 29, izin: 1, sakit: 1, alfa: 1 },
-  { day: 'Wed', hadir: 31, izin: 0, sakit: 1, alfa: 0 },
-  { day: 'Thu', hadir: 28, izin: 2, sakit: 1, alfa: 1 },
-  { day: 'Fri', hadir: 30, izin: 1, sakit: 0, alfa: 1 },
+  { day: 'Mon', present: 30, permitted: 1, sick: 1, absent: 0 },
+  { day: 'Tue', present: 29, permitted: 1, sick: 1, absent: 1 },
+  { day: 'Wed', present: 31, permitted: 0, sick: 1, absent: 0 },
+  { day: 'Thu', present: 28, permitted: 2, sick: 1, absent: 1 },
+  { day: 'Fri', present: 30, permitted: 1, sick: 0, absent: 1 },
 ]
 
 export type GradeRow = { nis: string; name: string; daily: number | null; midterm: number | null; final: number | null }
@@ -145,7 +145,7 @@ export type PendingRequest = {
   id: string
   student: string
   nis: string
-  status: 'izin' | 'sakit'
+  status: 'permitted' | 'sick'
   date: string
   note: string
   hasEvidence: boolean
@@ -153,9 +153,9 @@ export type PendingRequest = {
 }
 
 export const INITIAL_PENDING: PendingRequest[] = [
-  { id: 'p1', student: 'Bima Nugroho', nis: '2024103', status: 'sakit', date: 'Wed, 7 Oct', note: 'Fever since last night, doctor letter attached.', hasEvidence: true, evidenceFilename: 'doctor-note-bima.jpg' },
-  { id: 'p2', student: 'Dimas Aditya', nis: '2024105', status: 'izin', date: 'Wed, 7 Oct', note: 'Family wedding in Bandung.', hasEvidence: true, evidenceFilename: 'permission-letter-dimas.jpg' },
-  { id: 'p3', student: 'Eka Putri', nis: '2024106', status: 'sakit', date: 'Tue, 6 Oct', note: 'Dental appointment and recovery.', hasEvidence: true, evidenceFilename: 'clinic-note-eka.jpg' },
+  { id: 'p1', student: 'Bima Nugroho', nis: '2024103', status: 'sick', date: 'Wed, 7 Oct', note: 'Fever since last night, doctor letter attached.', hasEvidence: true, evidenceFilename: 'doctor-note-bima.jpg' },
+  { id: 'p2', student: 'Dimas Aditya', nis: '2024105', status: 'permitted', date: 'Wed, 7 Oct', note: 'Family wedding in Bandung.', hasEvidence: true, evidenceFilename: 'permission-letter-dimas.jpg' },
+  { id: 'p3', student: 'Eka Putri', nis: '2024106', status: 'sick', date: 'Tue, 6 Oct', note: 'Dental appointment and recovery.', hasEvidence: true, evidenceFilename: 'clinic-note-eka.jpg' },
 ]
 
 export const NOTIFICATIONS: Record<Role, string[]> = {
