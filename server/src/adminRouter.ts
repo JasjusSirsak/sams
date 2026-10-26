@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from 'express'
 import prisma from './db'
 import { requireAuth, requireRole } from './auth'
+import studentEnrollmentsRouter from './studentEnrollmentsRouter'
 
 type Input = Record<string, unknown>
 type AdminRecord = Record<string, unknown>
@@ -333,12 +334,20 @@ const studentsRouter = createResourceRouter({
   },
 })
 
+const STAFF_UP = requireRole('staff', 'admin', 'superadmin')
+const ADMIN_UP = requireRole('admin', 'superadmin')
+
 const adminRouter = Router()
-adminRouter.use(requireAuth, requireRole('admin', 'staff'))
-adminRouter.use('/classes', classesRouter)
-adminRouter.use('/subjects', subjectsRouter)
-adminRouter.use('/academic-periods', academicPeriodsRouter)
-adminRouter.use('/teachers', teachersRouter)
-adminRouter.use('/students', studentsRouter)
+adminRouter.use(requireAuth)
+
+// staff? yess
+adminRouter.use('/classes', STAFF_UP, classesRouter)
+adminRouter.use('/subjects', STAFF_UP, subjectsRouter)
+adminRouter.use('/academic-periods', STAFF_UP, academicPeriodsRouter)
+
+// admin only
+adminRouter.use('/teachers', ADMIN_UP, teachersRouter)
+adminRouter.use('/students', ADMIN_UP, studentsRouter)
+adminRouter.use('/student-enrollments', ADMIN_UP, studentEnrollmentsRouter)
 
 export default adminRouter

@@ -14,7 +14,42 @@ if (!JWT_SECRET_VALUE || JWT_SECRET_VALUE.length < 32) {
 
 export const JWT_SECRET: string = JWT_SECRET_VALUE
 export const AUTH_COOKIE_NAME = 'sams_session'
-export const TOKEN_EXPIRY_SECONDS = 8 * 60 * 60 // 8 hours session (standard work/school shift)
+
+// ============================================================
+// SESSION POLICY — ABSOLUTE EXPIRY (WIB)
+// ============================================================
+const TZ_OFFSET_HOURS = 7 // WIB
+
+// completion time per role (24-hour format, WIB)
+const END_OF_DAY_HOUR: Record<string, number> = {
+  student: 15,
+  teacher: 16,
+  admin: 17,
+  staff: 17,
+  parent: 23, // It’s not a work schedule; rhis role free to choose.
+}
+const DEFAULT_END_HOUR = 17
+const MIN_TTL_SECONDS = 30 * 60 // at least 30 minutes, so that the afternoon login doesn't immediately die
+/** 
+* Calculate the Unix timestamp (seconds) when the session should die, 
+* based on role & finished work hours in WIB. 
+*/
+export function computeSessionExp(role: string, now = new Date()): number {
+  const endHour = END_OF_DAY_HOUR[role] ?? DEFAULT_END_HOUR
+
+// shift to WIB, set time is complete, shift back to UTC
+  const wib = new Date(now.getTime() + TZ_OFFSET_HOURS * 3600_000)
+  wib.setUTCHours(endHour, 0, 0, 0)
+  let expMs = wib.getTime() - TZ_OFFSET_HOURS * 3600_000
+
+  // if it has passed or is too close, provide the minimum allocation
+  if (expMs - now.getTime() < MIN_TTL_SECONDS * 1000) {
+    expMs = now.getTime() + MIN_TTL_SECONDS * 1000
+  }
+  return Math.floor(expMs / 1000)
+}
+
+// ============================================================
 
 export interface JwtSessionPayload {
   userId: string
@@ -30,20 +65,25 @@ declare global {
   }
 }
 
-export function generateSessionToken(payload: JwtSessionPayload): string {
-  return jwt.sign(payload, JWT_SECRET, {
-    expiresIn: TOKEN_EXPIRY_SECONDS,
-  })
+export function generateSessionToken(payload: JwtSessionPayload): { token: string; exp: number } {
+  const exp = computeSessionExp(payload.role)
+  // Without `expiresIn` — `exp` is already an absolute claim in the payload.
+  const token = jwt.sign({ ...payload, exp }, JWT_SECRET)
+  return { token, exp }
 }
 
-export function setAuthCookie(res: Response, token: string) {
+export function setAuthCookie(res: Response, token: string, exp: number) {
   const isProd = process.env.NODE_ENV === 'production'
+
+// maxAge = relative duration (ms) from now to exp. 
+// Math.max(0, ...) so that it is never negative if there is a delay.
+  const maxAgeMs = Math.max(0, exp * 1000 - Date.now())
 
   res.cookie(AUTH_COOKIE_NAME, token, {
     httpOnly: true,
     secure: isProd,
     sameSite: 'lax',
-    maxAge: TOKEN_EXPIRY_SECONDS * 1000,
+    maxAge: maxAgeMs,
     path: '/',
   })
 }
@@ -61,9 +101,9 @@ export function clearAuthCookie(res: Response) {
 
 function normalizeRoleName(roleName: string): string {
   const role = roleName.trim().toLowerCase()
-  if (['teacher', 'guru', 'homeroom', 'wali', 'wali kelas'].includes(role)) return 'teacher'
-  if (['student', 'siswa'].includes(role)) return 'student'
-  if (['parent', 'orang tua', 'wali murid'].includes(role)) return 'parent'
+  if (['teacher', 'homeroom'].includes(role)) return 'teacher'
+  if (['student'].includes(role)) return 'student'
+  if (['parent', 'guardian'].includes(role)) return 'parent'
   return role
 }
 
@@ -86,6 +126,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   let decoded: JwtSessionPayload
   let userId: bigint
   try {
+   // jwt.verify automatically rejects tokens whose `exp` claims have passed.
     decoded = jwt.verify(token, JWT_SECRET) as JwtSessionPayload
     userId = BigInt(decoded.userId)
   } catch {
@@ -94,8 +135,8 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       message: 'Session has expired or is invalid. Please log in again.',
     })
   }
+
   try {
-    // Verify current account status and role in the database.
     const user = await prisma.users.findUnique({
       where: { user_id: userId },
       select: {
@@ -126,7 +167,6 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
 
 /**
  * Middleware to enforce Role-Based Access Control (RBAC).
- * Ensures that the authenticated user possesses one of the allowed roles.
  */
 export function requireRole(...allowedRoles: string[]) {
   return (req: Request, res: Response, next: NextFunction) => {

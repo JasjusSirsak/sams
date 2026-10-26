@@ -59,8 +59,8 @@ export const ACCESS: Record<string, Role[]> = {
   '/admin/classes': ['admin', 'staff'],
   '/admin/subjects': ['admin', 'staff'],
   '/admin/academic-periods': ['admin', 'staff'],
-  '/admin/teachers': ['admin', 'staff'],
-  '/admin/students': ['admin', 'staff'],
+  '/admin/teachers': ['admin'],
+  '/admin/students': ['admin'], 
 }
 
 export const canAccess = (role: Role, href: string, isHomeroom = false) =>

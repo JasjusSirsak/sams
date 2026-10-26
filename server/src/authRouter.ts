@@ -34,12 +34,12 @@ async function buildUserProfile(user: {
   let displayName = user.username
   let className: string | null = null
 
-  if (rawRole === 'teacher' || rawRole === 'guru' || rawRole === 'homeroom' || rawRole === 'wali' || rawRole === 'wali kelas') {
+  if (rawRole === 'teacher' || rawRole === 'homeroom') {
     mappedRole = 'teacher'
     if (user.teachers) {
       displayName = user.teachers.name
     }
-  } else if (rawRole === 'student' || rawRole === 'siswa') {
+  } else if (rawRole === 'student') {
     mappedRole = 'student'
     if (user.students) {
       displayName = user.students.name
@@ -47,7 +47,7 @@ async function buildUserProfile(user: {
         className = user.students.student_enrollments[0]?.classes?.name ?? null
       }
     }
-  } else if (rawRole === 'parent' || rawRole === 'orang tua' || rawRole === 'wali murid') {
+  } else if (rawRole === 'parent' || rawRole === 'guardian') {
     mappedRole = 'parent'
     if (user.parents) {
       displayName = user.parents.name
@@ -176,14 +176,14 @@ authRouter.post('/login', async (req: Request, res: Response) => {
     const profile = await buildAuthenticatedProfile(user)
 
     // Generate JWT token
-    const token = generateSessionToken({
+    const { token, exp } = generateSessionToken({
       userId: user.user_id.toString(),
       username: user.username,
       role: profile.role,
     })
 
-    // Set HttpOnly cookie
-    setAuthCookie(res, token)
+    // Set HttpOnly cookie die with token
+    setAuthCookie(res, token, exp)
 
     // Send successful response
     // Token is also included in body for the frontend Bearer-token interceptor
