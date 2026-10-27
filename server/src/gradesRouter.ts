@@ -16,7 +16,7 @@ function sendInternalError(res: Response, message: string, error: unknown) {
 gradesRouter.post(
   '/',
   requireAuth,
-  requireRole('teacher', 'staff', 'admin'),
+  requireRole('teacher'),
   async (req: Request, res: Response) => {
     try {
       return sendResult(res, await saveGrades(req.body, req.user!))
@@ -29,7 +29,7 @@ gradesRouter.post(
 gradesRouter.get(
   '/class/:classId/subject/:subjectId',
   requireAuth,
-  requireRole('teacher', 'staff', 'admin'),
+  requireRole('teacher'),
   async (req: Request, res: Response) => {
     try {
       return sendResult(

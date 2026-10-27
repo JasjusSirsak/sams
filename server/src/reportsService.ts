@@ -52,31 +52,28 @@ export async function getAttendanceReport(
 
     if (!teacher) throw new Error('FORBIDDEN_CLASS_SCOPE')
 
-    const assignment = normalizedRole === 'teacher'
-      ? await prisma.teaching_assignments.findFirst({
-          where: {
-            teacher_id: teacher.teacher_id,
-            class_id: classId,
-            academic_periods: {
-              start_date: { lte: endDate },
-              end_date: { gte: startDate },
-            },
-          },
-          select: { teaching_assignment_id: true },
-        })
-      : await prisma.homeroom_assignments.findFirst({
-          where: {
-            teacher_id: teacher.teacher_id,
-            class_id: classId,
-            academic_periods: {
-              start_date: { lte: endDate },
-              end_date: { gte: startDate },
-            },
-          },
-          select: { homeroom_assignment_id: true },
-        })
+    // Cek teaching ATAU homeroom assignment dalam periode yang beririsan.
+    // Bug sebelumnya: ternary `normalizedRole === 'teacher' ? ... : ...` selalu
+    // memilih teaching_assignments, sehingga wali kelas yang tidak mengajar
+    // mapel di kelasnya mendapat 403.
+    const periodFilter = {
+      academic_periods: {
+        start_date: { lte: endDate },
+        end_date: { gte: startDate },
+      },
+    }
+    const [teaching, homeroom] = await Promise.all([
+      prisma.teaching_assignments.findFirst({
+        where: { teacher_id: teacher.teacher_id, class_id: classId, ...periodFilter },
+        select: { teaching_assignment_id: true },
+      }),
+      prisma.homeroom_assignments.findFirst({
+        where: { teacher_id: teacher.teacher_id, class_id: classId, ...periodFilter },
+        select: { homeroom_assignment_id: true },
+      }),
+    ])
 
-    if (!assignment) throw new Error('FORBIDDEN_CLASS_SCOPE')
+    if (!teaching && !homeroom) throw new Error('FORBIDDEN_CLASS_SCOPE')
   }
 
   const classInfo = await prisma.classes.findUnique({

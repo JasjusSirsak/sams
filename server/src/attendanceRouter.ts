@@ -34,7 +34,7 @@ function sendInternalError(res: Response, message: string, error: unknown) {
 attendanceRouter.get(
   '/class',
   requireAuth,
-  requireRole('teacher'),
+  requireRole('teacher', 'staff', 'admin'),
   async (req: Request, res: Response) => {
     const classIdValue = req.query.classId
     const dateValue = req.query.date
@@ -63,41 +63,47 @@ attendanceRouter.get(
         return res.status(400).json({ message: 'The selected date is outside the active academic period.' })
       }
 
-      const teacher = await prisma.teachers.findUnique({
-        where: { user_id: BigInt(req.user!.userId) },
-        select: { teacher_id: true },
-      })
-      if (!teacher) {
-        return res.status(403).json({ message: 'Teacher profile not found.' })
-      }
-
+      const isTeacher = req.user!.role === 'teacher'
       const classId = BigInt(classIdValue)
-      const [classInfo, teachingAssignment, homeroomAssignment] = await Promise.all([
-        prisma.classes.findUnique({
-          where: { class_id: classId },
-          select: { class_id: true, name: true },
-        }),
-        prisma.teaching_assignments.findFirst({
-          where: {
-            teacher_id: teacher.teacher_id,
-            class_id: classId,
-            academic_period_id: period.academic_period_id,
-          },
-          select: { teaching_assignment_id: true },
-        }),
-        prisma.homeroom_assignments.findFirst({
-          where: {
-            teacher_id: teacher.teacher_id,
-            class_id: classId,
-            academic_period_id: period.academic_period_id,
-          },
-          select: { homeroom_assignment_id: true },
-        }),
-      ])
+      let isHomeroom = false
 
+      const classInfo = await prisma.classes.findUnique({
+        where: { class_id: classId },
+        select: { class_id: true, name: true },
+      })
       if (!classInfo) return res.status(404).json({ message: 'Class not found.' })
-      if (!teachingAssignment && !homeroomAssignment) {
-        return res.status(403).json({ message: 'You are not assigned to this class in the active academic period.' })
+
+      if (isTeacher) {
+        const teacher = await prisma.teachers.findUnique({
+          where: { user_id: BigInt(req.user!.userId) },
+          select: { teacher_id: true },
+        })
+        if (!teacher) return res.status(403).json({ message: 'Teacher profile not found.' })
+
+        const [teachingAssignment, homeroomAssignment] = await Promise.all([
+          prisma.teaching_assignments.findFirst({
+            where: {
+              teacher_id: teacher.teacher_id,
+              class_id: classId,
+              academic_period_id: period.academic_period_id,
+            },
+            select: { teaching_assignment_id: true },
+          }),
+          prisma.homeroom_assignments.findFirst({
+            where: {
+              teacher_id: teacher.teacher_id,
+              class_id: classId,
+              academic_period_id: period.academic_period_id,
+            },
+            select: { homeroom_assignment_id: true },
+          }),
+        ])
+        if (!teachingAssignment && !homeroomAssignment) {
+          return res
+            .status(403)
+            .json({ message: 'You are not assigned to this class in the active academic period.' })
+        }
+        isHomeroom = homeroomAssignment !== null
       }
 
       const dayOfWeek = selectedDate.getUTCDay()
@@ -178,7 +184,7 @@ attendanceRouter.get(
             semester: period.semester,
           },
           date: selectedDate.toISOString().slice(0, 10),
-          is_homeroom: homeroomAssignment !== null,
+          is_homeroom: isHomeroom,
           students: enrollments.map(({ students }) => {
             const record = recordByStudent.get(students.student_id.toString())
             return {
@@ -204,7 +210,7 @@ attendanceRouter.get(
 attendanceRouter.post(
   ['/session', '/sessions'],
   requireAuth,
-  requireRole('teacher', 'staff', 'admin', 'student'),
+  requireRole('teacher', 'admin', 'student'),
   async (req: Request, res: Response) => {
     try {
       return sendResult(res, await createOrGetAttendanceSession(req.body, req.user!))
@@ -243,7 +249,8 @@ attendanceRouter.get(
       if (!record) return res.status(404).json({ message: 'Evidence file not found.' })
 
       const role = req.user!.role.toLowerCase()
-      const isAuthorizedStaff = role === 'staff' || role === 'admin'
+      // Hanya admin yang boleh melihat bukti siapa pun. Staff tidak lagi.
+      const isAuthorizedAdmin = role === 'admin'
       const isOwningStudent = role === 'student' && record.students.user_id?.toString() === req.user!.userId
       const assignment =
         role === 'teacher' && period
@@ -258,7 +265,7 @@ attendanceRouter.get(
           : null
       const isAssignedHomeroomTeacher = assignment !== null
 
-      if (!isAuthorizedStaff && !isOwningStudent && !isAssignedHomeroomTeacher) {
+      if (!isAuthorizedAdmin && !isOwningStudent && !isAssignedHomeroomTeacher) {
         return res.status(404).json({ message: 'Evidence file not found.' })
       }
 
@@ -323,7 +330,7 @@ attendanceRouter.post(
 attendanceRouter.post(
   ['/record', '/records'],
   requireAuth,
-  requireRole('teacher', 'staff', 'admin', 'student'),
+  requireRole('teacher', 'admin', 'student'),
   handleEvidenceUpload('file'),
   async (req: Request, res: Response) => {
     try {

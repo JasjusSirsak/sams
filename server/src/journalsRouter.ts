@@ -142,7 +142,7 @@ journalsRouter.get(
 journalsRouter.post(
   '/',
   requireAuth,
-  requireRole('teacher', 'staff', 'admin'),
+  requireRole('teacher'),
   async (req: Request, res: Response) => {
     try {
       const sessionUser = req.user!
@@ -216,7 +216,7 @@ journalsRouter.post(
 journalsRouter.put(
   '/:journalId',
   requireAuth,
-  requireRole('teacher', 'staff', 'admin'),
+  requireRole('teacher'),
   async (req: Request, res: Response) => {
     try {
       const sessionUser = req.user!
@@ -281,7 +281,7 @@ journalsRouter.put(
 journalsRouter.delete(
   '/:journalId',
   requireAuth,
-  requireRole('teacher', 'staff', 'admin'),
+  requireRole('teacher'),
   async (req: Request, res: Response) => {
     try {
       const sessionUser = req.user!
