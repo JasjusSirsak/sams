@@ -2,7 +2,7 @@ node_modules
 # Keep environment variables out of version control
 .env
 schema.example.backup.prisma
-/src/generated/prisma
 src/hash.ts
 AGENDA_MANUAL_TESTS.MD
 private_uploads/
+/src/auth.test.ts

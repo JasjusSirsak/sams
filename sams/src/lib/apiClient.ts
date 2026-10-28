@@ -1,4 +1,8 @@
-import axios, { type AxiosError, type AxiosRequestConfig } from 'axios'
+import axios, {
+  type AxiosError,
+  type AxiosRequestConfig,
+  type InternalAxiosRequestConfig,
+} from 'axios'
 
 export interface ApiErrorResponse {
   status: number
@@ -9,22 +13,76 @@ export interface ApiErrorResponse {
 
 const apiClient = axios.create({
   baseURL: '/api',
-  withCredentials: true, // Preparation for HttpOnly session cookie
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
   },
 })
 
-// Request interceptor: automatically attach Bearer token if present in localStorage
-apiClient.interceptors.request.use((config) => {
+type RetryableRequestConfig = InternalAxiosRequestConfig & { _authRetry?: boolean }
+
+let refreshPromise: Promise<void> | null = null
+let authenticationFailureHandler: (() => void) | null = null
+
+export function setAuthenticationFailureHandler(handler: () => void): () => void {
+  authenticationFailureHandler = handler
+  return () => {
+    if (authenticationFailureHandler === handler) authenticationFailureHandler = null
+  }
+}
+
+function isAuthEndpoint(url?: string): boolean {
+  const path = url?.split('?')[0]
+  return path === '/auth/login' || path === '/auth/refresh' || path === '/auth/logout'
+}
+
+function clearAuthenticationState() {
   if (typeof window !== 'undefined') {
-    const token = localStorage.getItem('sams_token')
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`
+    localStorage.removeItem('sams_token')
+    localStorage.removeItem('sams_user')
+  }
+  authenticationFailureHandler?.()
+}
+
+apiClient.interceptors.response.use(
+  (response) => response,
+  async (error: AxiosError) => {
+    const config = error.config as RetryableRequestConfig | undefined
+    if (
+      error.response?.status !== 401 ||
+      !config ||
+      config._authRetry ||
+      isAuthEndpoint(config.url)
+    ) {
+      return Promise.reject(error)
+    }
+
+    config._authRetry = true
+    try {
+      if (!refreshPromise) {
+        refreshPromise = apiClient
+          .post('/auth/refresh')
+          .then(() => undefined)
+          .finally(() => {
+            refreshPromise = null
+          })
+      }
+      await refreshPromise
+    } catch (refreshError) {
+      clearAuthenticationState()
+      return Promise.reject(refreshError)
+    }
+
+    try {
+      return await apiClient.request(config)
+    } catch (retryError) {
+      if (axios.isAxiosError(retryError) && retryError.response?.status === 401) {
+        clearAuthenticationState()
+      }
+      return Promise.reject(retryError)
     }
   }
-  return config
-})
+)
 
 // Helper for standardized global error handling
 export function parseApiError(err: unknown): ApiErrorResponse {

@@ -1,6 +1,7 @@
 // server/src/auth.ts
 import 'dotenv/config'
 import type { Request, Response, NextFunction } from 'express'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import jwt from 'jsonwebtoken'
 import prisma from './db'
 
@@ -14,42 +15,48 @@ if (!JWT_SECRET_VALUE || JWT_SECRET_VALUE.length < 32) {
 
 export const JWT_SECRET: string = JWT_SECRET_VALUE
 export const AUTH_COOKIE_NAME = 'sams_session'
+export const REFRESH_COOKIE_NAME = 'sams_refresh'
 
-// ============================================================
-// SESSION POLICY — ABSOLUTE EXPIRY (WIB)
-// ============================================================
-const TZ_OFFSET_HOURS = 7 // WIB
-
-// completion time per role (24-hour format, WIB)
-const END_OF_DAY_HOUR: Record<string, number> = {
-  student: 15,
-  teacher: 16,
-  admin: 17,
-  staff: 17,
-  parent: 23, // It’s not a work schedule; rhis role free to choose.
-}
-const DEFAULT_END_HOUR = 17
-const MIN_TTL_SECONDS = 30 * 60 // at least 30 minutes, so that the afternoon login doesn't immediately die
-/** 
-* Calculate the Unix timestamp (seconds) when the session should die, 
-* based on role & finished work hours in WIB. 
-*/
-export function computeSessionExp(role: string, now = new Date()): number {
-  const endHour = END_OF_DAY_HOUR[role] ?? DEFAULT_END_HOUR
-
-// shift to WIB, set time is complete, shift back to UTC
-  const wib = new Date(now.getTime() + TZ_OFFSET_HOURS * 3600_000)
-  wib.setUTCHours(endHour, 0, 0, 0)
-  let expMs = wib.getTime() - TZ_OFFSET_HOURS * 3600_000
-
-  // if it has passed or is too close, provide the minimum allocation
-  if (expMs - now.getTime() < MIN_TTL_SECONDS * 1000) {
-    expMs = now.getTime() + MIN_TTL_SECONDS * 1000
+function positiveIntegerSetting(name: string, fallback: number): number {
+  const raw = process.env[name]
+  if (raw === undefined) return fallback
+  if (!/^[1-9]\d*$/.test(raw)) {
+    throw new Error(`${name} must be a positive integer.`)
   }
-  return Math.floor(expMs / 1000)
+  const parsed = Number(raw)
+  if (!Number.isSafeInteger(parsed)) {
+    throw new Error(`${name} must be a safe positive integer.`)
+  }
+  return parsed
 }
 
-// ============================================================
+export const ACCESS_TOKEN_TTL_MINUTES = positiveIntegerSetting('ACCESS_TOKEN_TTL_MINUTES', 15)
+export const REFRESH_IDLE_TTL_DAYS = positiveIntegerSetting('REFRESH_IDLE_TTL_DAYS', 7)
+export const REFRESH_ABSOLUTE_TTL_DAYS = positiveIntegerSetting('REFRESH_ABSOLUTE_TTL_DAYS', 30)
+export const ACCESS_TOKEN_TTL_SECONDS = ACCESS_TOKEN_TTL_MINUTES * 60
+const DAY_MS = 24 * 60 * 60 * 1000
+
+const appOriginValue =
+  process.env.APP_ORIGIN ??
+  (process.env.NODE_ENV === 'production' ? undefined : 'http://localhost:5173')
+if (!appOriginValue) {
+  throw new Error('APP_ORIGIN must be configured in production.')
+}
+
+let APP_ORIGIN: string
+try {
+  const parsedOrigin = new URL(appOriginValue)
+  if (
+    parsedOrigin.origin !== appOriginValue ||
+    !['http:', 'https:'].includes(parsedOrigin.protocol) ||
+    (process.env.NODE_ENV === 'production' && parsedOrigin.protocol !== 'https:')
+  ) {
+    throw new Error()
+  }
+  APP_ORIGIN = parsedOrigin.origin
+} catch {
+  throw new Error('APP_ORIGIN must be a valid origin without a path.')
+}
 
 export interface JwtSessionPayload {
   userId: string
@@ -66,17 +73,17 @@ declare global {
 }
 
 export function generateSessionToken(payload: JwtSessionPayload): { token: string; exp: number } {
-  const exp = computeSessionExp(payload.role)
-  // Without `expiresIn` — `exp` is already an absolute claim in the payload.
-  const token = jwt.sign({ ...payload, exp }, JWT_SECRET)
+  const token = jwt.sign(payload, JWT_SECRET, { expiresIn: ACCESS_TOKEN_TTL_SECONDS })
+  const decoded = jwt.decode(token) as JwtSessionPayload & { exp: number }
+  const exp = decoded.exp
   return { token, exp }
 }
 
 export function setAuthCookie(res: Response, token: string, exp: number) {
   const isProd = process.env.NODE_ENV === 'production'
 
-// maxAge = relative duration (ms) from now to exp. 
-// Math.max(0, ...) so that it is never negative if there is a delay.
+  // maxAge = relative duration (ms) from now to exp.
+  // Math.max(0, ...) so that it is never negative if there is a delay.
   const maxAgeMs = Math.max(0, exp * 1000 - Date.now())
 
   res.cookie(AUTH_COOKIE_NAME, token, {
@@ -88,15 +95,92 @@ export function setAuthCookie(res: Response, token: string, exp: number) {
   })
 }
 
-export function clearAuthCookie(res: Response) {
+export function setRefreshCookie(res: Response, token: string, expiresAt: Date) {
   const isProd = process.env.NODE_ENV === 'production'
+  const maxAgeMs = Math.max(0, expiresAt.getTime() - Date.now())
 
+  res.cookie(REFRESH_COOKIE_NAME, token, {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: 'lax',
+    maxAge: maxAgeMs,
+    path: '/api/auth',
+  })
+}
+
+export function clearAuthCookies(res: Response) {
+  const isProd = process.env.NODE_ENV === 'production'
   res.clearCookie(AUTH_COOKIE_NAME, {
     httpOnly: true,
     secure: isProd,
     sameSite: 'lax',
     path: '/',
   })
+  res.clearCookie(REFRESH_COOKIE_NAME, {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: 'lax',
+    path: '/api/auth',
+  })
+}
+
+export function clearAccessCookie(res: Response) {
+  const isProd = process.env.NODE_ENV === 'production'
+  res.clearCookie(AUTH_COOKIE_NAME, {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: 'lax',
+    path: '/',
+  })
+}
+
+export function createRefreshToken(): string {
+  return randomBytes(32).toString('base64url')
+}
+
+export function isValidRefreshToken(token: string): boolean {
+  return /^[A-Za-z0-9_-]{43}$/.test(token)
+}
+
+export function hashRefreshToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex')
+}
+
+export async function createRefreshSession(userId: bigint): Promise<{ token: string; expiresAt: Date }> {
+  const now = new Date()
+  const absoluteExpiresAt = new Date(now.getTime() + REFRESH_ABSOLUTE_TTL_DAYS * DAY_MS)
+  const expiresAt = new Date(
+    Math.min(now.getTime() + REFRESH_IDLE_TTL_DAYS * DAY_MS, absoluteExpiresAt.getTime())
+  )
+  const familyId = randomUUID()
+  const token = createRefreshToken()
+
+  await prisma.refresh_sessions.deleteMany({
+    where: { absolute_expires_at: { lte: now } },
+  })
+  await prisma.refresh_sessions.create({
+    data: {
+      family_id: familyId,
+      user_id: userId,
+      token_hash: hashRefreshToken(token),
+      created_at: now,
+      idle_expires_at: expiresAt,
+      absolute_expires_at: absoluteExpiresAt,
+    },
+  })
+
+  return { token, expiresAt }
+}
+
+export function requireSameOrigin(req: Request, res: Response, next: NextFunction) {
+  if (req.get('origin') !== APP_ORIGIN) {
+    return res.status(403).json({
+      success: false,
+      code: 'CSRF_REJECTED',
+      message: 'Request origin is not allowed.',
+    })
+  }
+  return next()
 }
 
 function normalizeRoleName(roleName: string): string {
@@ -113,10 +197,6 @@ function normalizeRoleName(roleName: string): string {
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   let token = req.cookies?.[AUTH_COOKIE_NAME]
 
-  if (!token && req.headers.authorization?.startsWith('Bearer ')) {
-    token = req.headers.authorization.split(' ')[1]
-  }
-
   if (!token) {
     return res.status(401).json({
       message: 'Authentication required. Session not found.',
@@ -126,11 +206,11 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   let decoded: JwtSessionPayload
   let userId: bigint
   try {
-   // jwt.verify automatically rejects tokens whose `exp` claims have passed.
+    // jwt.verify automatically rejects tokens whose `exp` claims have passed.
     decoded = jwt.verify(token, JWT_SECRET) as JwtSessionPayload
     userId = BigInt(decoded.userId)
   } catch {
-    clearAuthCookie(res)
+    clearAccessCookie(res)
     return res.status(401).json({
       message: 'Session has expired or is invalid. Please log in again.',
     })
@@ -147,7 +227,13 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       },
     })
     if (!user || !user.is_active) {
-      clearAuthCookie(res)
+      if (user) {
+        await prisma.refresh_sessions.updateMany({
+          where: { user_id: user.user_id, revoked_at: null },
+          data: { revoked_at: new Date() },
+        })
+      }
+      clearAuthCookies(res)
       return res.status(401).json({
         message: 'Your account has been deactivated or does not exist.',
       })

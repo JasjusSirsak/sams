@@ -249,7 +249,7 @@ attendanceRouter.get(
       if (!record) return res.status(404).json({ message: 'Evidence file not found.' })
 
       const role = req.user!.role.toLowerCase()
-      // Hanya admin yang boleh melihat bukti siapa pun. Staff tidak lagi.
+      // Only admin that can see evidence
       const isAuthorizedAdmin = role === 'admin'
       const isOwningStudent = role === 'student' && record.students.user_id?.toString() === req.user!.userId
       const assignment =

@@ -4,14 +4,13 @@ import { createContext, useContext, useEffect, useState, type Dispatch, type Rea
 import { type PendingRequest, type Role } from './data'
 import {
   checkSession,
-  getStoredUser,
   login as apiLogin,
   logout as apiLogout,
-  saveSession,
   type LoginCredentials,
   type User,
 } from './auth'
 import { getHomeroomRequests } from './api'
+import { setAuthenticationFailureHandler } from './apiClient'
 
 export type ReviewedRequest = PendingRequest & { decision: 'approved' | 'rejected' }
 
@@ -38,19 +37,13 @@ type AppState = {
   login: (credentials: LoginCredentials) => Promise<User>
   logout: () => Promise<void>
   checkAuthStatus: () => Promise<void>
-  // Manual setter for backward compatibility
-  signIn: (user: User) => void
-  signOut: () => void
 }
 
 const AppContext = createContext<AppState | null>(null)
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  // Get initial stored user synchronously if present in localStorage (reduces flicker)
-  const initialUser = typeof window !== 'undefined' ? getStoredUser() : null
-
-  const [user, setUser] = useState<User | null>(initialUser)
-  const [role, setRole] = useState<Role>(initialUser?.role ?? 'student')
+  const [user, setUser] = useState<User | null>(null)
+  const [role, setRole] = useState<Role>('student')
   const [isLoading, setIsLoading] = useState<boolean>(true)
 
   const [dark, setDark] = useState(false)
@@ -63,6 +56,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     document.documentElement.classList.toggle('dark', dark)
   }, [dark])
+
+  useEffect(() => {
+    return setAuthenticationFailureHandler(() => {
+      setUser(null)
+      setRole('student')
+      setPending([])
+    })
+  }, [])
 
   // Verify session on mount
   useEffect(() => {
@@ -83,9 +84,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
       } catch {
         if (isMounted) {
-          const stored = getStoredUser()
-          setUser(stored ? { ...stored, isHomeroom: false, homeroomClassId: null } : null)
-          if (stored) setRole(stored.role)
+          setUser(null)
+          setRole('student')
+          setPending([])
         }
       } finally {
         if (isMounted) {
@@ -158,12 +159,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   async function login(credentials: LoginCredentials): Promise<User> {
     setIsLoading(true)
     try {
-      const result = await apiLogin(credentials)
-      saveSession(result.token, result.user)
-      setUser(result.user)
-      setRole(result.user.role)
+      const loggedInUser = await apiLogin(credentials)
+      setUser(loggedInUser)
+      setRole(loggedInUser.role)
       setPending([])
-      return result.user
+      return loggedInUser
     } finally {
       setIsLoading(false)
     }
@@ -173,23 +173,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setIsLoading(true)
     try {
       await apiLogout()
+    } finally {
       setUser(null)
       setRole('student')
       setPending([])
-    } finally {
       setIsLoading(false)
     }
-  }
-
-  // Backward-compatible methods
-  function signIn(u: User) {
-    setUser(u)
-    setRole(u.role)
-    setPending([])
-  }
-
-  function signOut() {
-    void logout()
   }
 
   function decide(id: string, decision: 'approved' | 'rejected') {
@@ -225,8 +214,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         login,
         logout,
         checkAuthStatus,
-        signIn,
-        signOut,
       }}
     >
       {children}

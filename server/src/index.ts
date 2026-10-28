@@ -16,7 +16,13 @@ import parentRouter from './parentRouter'
 import reportsRouter from './reportsRouter'
 import adminRouter from './adminRouter'
 import agendaRouter from './agendaRouter'
-import { requireAuth, requireRole } from './auth'
+import {
+  AUTH_COOKIE_NAME,
+  REFRESH_COOKIE_NAME,
+  requireAuth,
+  requireRole,
+  requireSameOrigin,
+} from './auth'
 import { getActivePeriod } from './services/academicPeriod'
 
 const app = express()
@@ -36,6 +42,13 @@ app.disable('x-powered-by')
 app.use(express.json({ limit: '100kb' }))
 app.use(express.urlencoded({ extended: true, limit: '100kb' }))
 app.use(cookieParser())
+app.use('/api', (req, res, next) => {
+  const isMutation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)
+  const hasAuthCookie =
+    Boolean(req.cookies?.[AUTH_COOKIE_NAME]) || Boolean(req.cookies?.[REFRESH_COOKIE_NAME])
+  if (isMutation && hasAuthCookie) return requireSameOrigin(req, res, next)
+  return next()
+})
 
 // 2. Rate Limiter for Login Endpoint (Prevents brute-force & credential stuffing)
 const authLimiter = rateLimit({

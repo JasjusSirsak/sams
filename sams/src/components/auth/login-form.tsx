@@ -76,7 +76,7 @@ export function LoginForm() {
 
     setSubmitting(true)
     try {
-      // useApp().login() handles: API call → saveSession → setUser → setRole
+      // useApp().login() establishes the server cookie and updates the verified profile.
       await login({
         identity: values.identity.trim(),
         password: values.password,

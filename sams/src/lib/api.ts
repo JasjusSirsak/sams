@@ -61,16 +61,19 @@ export async function getTodayAttendance(): Promise<TodayAttendanceRecord | null
 }
 
 export async function getAttendanceEvidence(filename: string, signal?: AbortSignal): Promise<Blob> {
-  const token = typeof window === 'undefined' ? null : localStorage.getItem('sams_token')
-  const response = await fetch(`/api/attendance/evidence/${encodeURIComponent(filename)}`, {
-    credentials: 'include',
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    signal,
-  })
-  if (!response.ok) {
-    throw new Error(response.status === 404 ? 'Evidence file not found.' : 'Failed to load attendance evidence.')
+  try {
+    const response = await apiClient.get<Blob>(
+      `/attendance/evidence/${encodeURIComponent(filename)}`,
+      { responseType: 'blob', signal }
+    )
+    return response.data
+  } catch (error) {
+    const apiError = parseApiError(error)
+    if (apiError.status === 404) {
+      throw new Error('Evidence file not found.', { cause: error })
+    }
+    throw new Error(apiError.message || 'Failed to load attendance evidence.', { cause: error })
   }
-  return response.blob()
 }
 
 export async function saveGrades(payload: {

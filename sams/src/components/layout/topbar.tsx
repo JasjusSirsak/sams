@@ -9,7 +9,7 @@ import { canAccess, cn, getInitials } from '@/lib/helpers'
 import { Avatar } from '@/components/ui-kit'
 
 export function Topbar({ onMenu }: { onMenu: () => void }) {
-  const { role, dark, toggleDark, query, setQuery, user: authUser } = useApp()
+  const { role, dark, toggleDark, query, setQuery, user: authUser, logout } = useApp()
   const router = useRouter()
   
   // Open state for bell notifications or profile menu
@@ -29,23 +29,15 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
     router.push(canAccess(activeRole, '/students') ? '/students' : '/agenda')
   }
 
-//this paragraft for log out handler
-function handleLogout() {
-// 1. Clear all storage to ensure no residual tokens remain, regardless of key names
-localStorage.clear()
-sessionStorage.clear()
-
-// 2. Remove any client-side cookies
-document.cookie.split(";").forEach((c) => {
-document.cookie = c
-.replace(/^ +/, "")
-.replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
-}); 
-
-// 3. Force a full page reload to the login page using window.location
-window.location.href = '/login'
-
-}
+  async function handleLogout() {
+    try {
+      await logout()
+    } catch (error) {
+      console.error('Logout request failed:', error)
+      window.alert('SAMS could not confirm logout with the server. Please try again when the connection is available.')
+    }
+    router.replace('/login')
+  }
 
   return (
     <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-line bg-background/80 px-4 py-3 backdrop-blur md:px-8">
