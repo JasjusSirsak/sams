@@ -11,6 +11,7 @@ import AttendancePage from './pages/attendance/page'
 import GradesPage from './pages/grades/page'
 import StudentsPage from './pages/students/page'
 import AdminMasterDataPage from './pages/admin/master-data-page'
+import ManageStudentsPage from './pages/admin/manage-students-page'
 import NotFoundPage from './pages/not-found'
 import { ACCESS, canAccess } from './lib/helpers'
 
@@ -112,7 +113,10 @@ function AppRoutes() {
   else if (pathname === '/grades') page = <GradesPage />
   else if (pathname === '/students') page = <StudentsPage />
   else if (pathname === '/agenda') page = <AgendaPage />
-  else if (pathname.startsWith('/admin/') && Object.prototype.hasOwnProperty.call(ACCESS, pathname)) {
+  else if (pathname === '/admin/students' || pathname.startsWith('/admin/students/')) {
+    accessPath = '/admin/students'
+    page = <ManageStudentsPage />
+  } else if (pathname.startsWith('/admin/') && Object.prototype.hasOwnProperty.call(ACCESS, pathname)) {
     page = <AdminMasterDataPage />
   } else {
     accessPath = null

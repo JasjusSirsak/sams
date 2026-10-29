@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express'
 import prisma from './db'
 import { requireAuth, requireRole } from './auth'
 import studentEnrollmentsRouter from './studentEnrollmentsRouter'
+import { getActivePeriod } from './services/academicPeriod'
 
 type Input = Record<string, unknown>
 type AdminRecord = Record<string, unknown>
@@ -268,8 +269,33 @@ const academicPeriodsRouter = createResourceRouter({
 
 const teachersRouter = createResourceRouter({
   async list() {
-    const rows = await prisma.teachers.findMany({ orderBy: { name: 'asc' } })
-    return rows.map((row) => record(row, row.teacher_id))
+    const rows = await prisma.teachers.findMany({
+      orderBy: { name: 'asc' },
+      include: {
+        teaching_assignments: {
+          select: {
+            classes: { select: { name: true } },
+            subjects: { select: { name: true } },
+          },
+        },
+      },
+    })
+    return rows.map((row) => {
+      // Extract unique class and subject names
+      const classSet = new Set<string>()
+      const subjectSet = new Set<string>()
+      for (const ta of row.teaching_assignments ?? []) {
+        if (ta.classes?.name) classSet.add(ta.classes.name)
+        if (ta.subjects?.name) subjectSet.add(ta.subjects.name)
+      }
+      // Attach arrays to the row object for serialization
+      const enriched = {
+        ...row,
+        classes: Array.from(classSet),
+        subjects: Array.from(subjectSet),
+      }
+      return record(enriched, row.teacher_id)
+    })
   },
   async create(input) {
     const row = await prisma.teachers.create({
@@ -349,5 +375,232 @@ adminRouter.use('/academic-periods', STAFF_UP, academicPeriodsRouter)
 adminRouter.use('/teachers', ADMIN_UP, teachersRouter)
 adminRouter.use('/students', ADMIN_UP, studentsRouter)
 adminRouter.use('/student-enrollments', ADMIN_UP, studentEnrollmentsRouter)
+
+// Class Library Catalog: list classes with enrollment counts for active academic period
+adminRouter.get('/class-catalog', STAFF_UP, async (_req: Request, res: Response) => {
+  try {
+    const activePeriod = await getActivePeriod()
+    const activePeriodId = activePeriod?.academic_period_id
+
+    const classesList = await prisma.classes.findMany({
+      orderBy: [{ grade_level: 'asc' }, { name: 'asc' }],
+      include: {
+        student_enrollments: activePeriodId
+          ? {
+              where: { academic_period_id: activePeriodId },
+              select: { enrollment_id: true },
+            }
+          : false,
+      },
+    })
+
+    const data = classesList.map((cls) => ({
+      id: cls.class_id.toString(),
+      name: cls.name,
+      grade_level: cls.grade_level,
+      academic_year: activePeriod ? activePeriod.academic_year : '2026/2027',
+      student_count: cls.student_enrollments ? cls.student_enrollments.length : 0,
+    }))
+
+    return res.json({ data, active_period: activePeriod ? serialize(activePeriod) : null })
+  } catch (error) {
+    return sendError(res, error, 'Failed to fetch class catalog.')
+  }
+})
+
+// Class Detail: Students in class for active academic period
+adminRouter.get('/classes/:classId/students', STAFF_UP, async (req: Request, res: Response) => {
+  const classId = parseId(typeof req.params.classId === 'string' ? req.params.classId : undefined)
+  if (!classId) return res.status(400).json({ message: 'A valid class ID is required.' })
+
+  try {
+    const cls = await prisma.classes.findUnique({
+      where: { class_id: classId },
+    })
+    if (!cls) return res.status(404).json({ message: 'Class not found.' })
+
+    const activePeriod = await getActivePeriod()
+    const activePeriodId = activePeriod?.academic_period_id
+
+    const enrollments = await prisma.student_enrollments.findMany({
+      where: {
+        class_id: classId,
+        ...(activePeriodId ? { academic_period_id: activePeriodId } : {}),
+      },
+      include: {
+        students: true,
+      },
+      orderBy: {
+        students: {
+          name: 'asc',
+        },
+      },
+    })
+
+    const students = enrollments.map((enr) => {
+      const s = enr.students
+      return {
+        id: s.student_id.toString(),
+        enrollment_id: enr.enrollment_id.toString(),
+        nis: s.nis,
+        name: s.name,
+        birth_date: s.birth_date ? s.birth_date.toISOString().slice(0, 10) : '',
+        phone_number: s.phone_number || '',
+        address: s.address || '',
+        account_status: s.user_id ? 'Active' : 'Pending',
+      }
+    })
+
+    return res.json({
+      data: {
+        class: {
+          id: cls.class_id.toString(),
+          name: cls.name,
+          grade_level: cls.grade_level,
+          academic_year: activePeriod ? activePeriod.academic_year : '2026/2027',
+          student_count: students.length,
+        },
+        students,
+      },
+    })
+  } catch (error) {
+    return sendError(res, error, 'Failed to fetch class students.')
+  }
+})
+
+// Bulk / Manual Add Students into Class
+adminRouter.post('/classes/:classId/students', ADMIN_UP, async (req: Request, res: Response) => {
+  const classId = parseId(typeof req.params.classId === 'string' ? req.params.classId : undefined)
+  if (!classId) return res.status(400).json({ message: 'A valid class ID is required.' })
+
+  try {
+    const cls = await prisma.classes.findUnique({ where: { class_id: classId } })
+    if (!cls) return res.status(404).json({ message: 'Class not found.' })
+
+    let activePeriod = await getActivePeriod()
+    if (!activePeriod) {
+      activePeriod = await prisma.academic_periods.findFirst({
+        orderBy: [{ academic_year: 'desc' }, { semester: 'desc' }],
+      })
+    }
+    if (!activePeriod) {
+      return res.status(400).json({ message: 'No academic period found. Please create one first.' })
+    }
+
+    const body = req.body
+    const items = Array.isArray(body?.students)
+      ? body.students
+      : body && typeof body === 'object' && body.nis
+      ? [body]
+      : []
+
+    if (items.length === 0) {
+      return res.status(400).json({ message: 'Please provide at least one student.' })
+    }
+
+    const addedStudents = []
+
+    for (const item of items) {
+      const nis = String(item.nis || '').trim()
+      const name = String(item.name || '').trim()
+      if (!nis || !name) continue
+
+      const birthDate = item.birth_date && /^\d{4}-\d{2}-\d{2}$/.test(String(item.birth_date))
+        ? new Date(`${item.birth_date}T00:00:00.000Z`)
+        : null
+      const phone = item.phone_number ? String(item.phone_number).trim() : null
+      const address = item.address ? String(item.address).trim() : null
+
+      // Find or create student by NIS
+      let student = await prisma.students.findUnique({ where: { nis } })
+      if (!student) {
+        student = await prisma.students.create({
+          data: {
+            nis,
+            name,
+            birth_date: birthDate,
+            phone_number: phone,
+            address,
+          },
+        })
+      } else {
+        // Update basic info if provided
+        student = await prisma.students.update({
+          where: { student_id: student.student_id },
+          data: {
+            name,
+            birth_date: birthDate ?? student.birth_date,
+            phone_number: phone ?? student.phone_number,
+            address: address ?? student.address,
+          },
+        })
+      }
+
+      // Ensure enrolled in this class for the active academic period
+      const existingEnrollment = await prisma.student_enrollments.findFirst({
+        where: {
+          student_id: student.student_id,
+          academic_period_id: activePeriod.academic_period_id,
+        },
+      })
+
+      if (!existingEnrollment) {
+        await prisma.student_enrollments.create({
+          data: {
+            student_id: student.student_id,
+            class_id: classId,
+            academic_period_id: activePeriod.academic_period_id,
+          },
+        })
+      } else if (existingEnrollment.class_id !== classId) {
+        // Update enrollment to current class
+        await prisma.student_enrollments.update({
+          where: { enrollment_id: existingEnrollment.enrollment_id },
+          data: { class_id: classId },
+        })
+      }
+
+      addedStudents.push({
+        id: student.student_id.toString(),
+        nis: student.nis,
+        name: student.name,
+        birth_date: student.birth_date ? student.birth_date.toISOString().slice(0, 10) : '',
+        phone_number: student.phone_number || '',
+        address: student.address || '',
+        account_status: student.user_id ? 'Active' : 'Pending',
+      })
+    }
+
+    return res.status(201).json({
+      message: `Enrolled ${addedStudents.length} student(s) successfully.`,
+      data: addedStudents,
+    })
+  } catch (error) {
+    return sendError(res, error, 'Failed to add students to class.')
+  }
+})
+
+// Remove student enrollment from class
+adminRouter.delete('/classes/:classId/students/:studentId', ADMIN_UP, async (req: Request, res: Response) => {
+  const classId = parseId(typeof req.params.classId === 'string' ? req.params.classId : undefined)
+  const studentId = parseId(typeof req.params.studentId === 'string' ? req.params.studentId : undefined)
+  if (!classId || !studentId) {
+    return res.status(400).json({ message: 'A valid class ID and student ID are required.' })
+  }
+
+  try {
+    const activePeriod = await getActivePeriod()
+    await prisma.student_enrollments.deleteMany({
+      where: {
+        class_id: classId,
+        student_id: studentId,
+        ...(activePeriod ? { academic_period_id: activePeriod.academic_period_id } : {}),
+      },
+    })
+    return res.status(204).end()
+  } catch (error) {
+    return sendError(res, error, 'Failed to remove student from class.')
+  }
+})
 
 export default adminRouter

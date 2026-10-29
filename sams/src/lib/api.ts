@@ -499,3 +499,62 @@ export async function updateAdminRecord(
 export async function deleteAdminRecord(entity: AdminEntity, id: string): Promise<void> {
   await apiClient.delete(`/admin/${entity}/${encodeURIComponent(id)}`)
 }
+
+export interface AdminClassCatalogItem {
+  id: string
+  name: string
+  grade_level: number
+  academic_year: string
+  student_count: number
+}
+
+export interface AdminClassStudent {
+  id: string
+  enrollment_id?: string
+  nis: string
+  name: string
+  birth_date: string
+  phone_number: string
+  address: string
+  account_status: 'Active' | 'Pending' | 'Inactive'
+}
+
+export interface AdminClassDetailData {
+  class: AdminClassCatalogItem
+  students: AdminClassStudent[]
+}
+
+export async function getAdminClassCatalog(): Promise<AdminClassCatalogItem[]> {
+  const response = await apiClient.get<{ data: AdminClassCatalogItem[] }>('/admin/class-catalog')
+  return response.data.data
+}
+
+export async function getAdminClassStudents(classId: string): Promise<AdminClassDetailData> {
+  const response = await apiClient.get<{ data: AdminClassDetailData }>(
+    `/admin/classes/${encodeURIComponent(classId)}/students`
+  )
+  return response.data.data
+}
+
+export async function addAdminClassStudents(
+  classId: string,
+  students: Array<{
+    nis: string
+    name: string
+    birth_date?: string
+    phone_number?: string
+    address?: string
+  }>
+): Promise<{ message: string; data: AdminClassStudent[] }> {
+  const response = await apiClient.post<{ message: string; data: AdminClassStudent[] }>(
+    `/admin/classes/${encodeURIComponent(classId)}/students`,
+    { students }
+  )
+  return response.data
+}
+
+export async function removeAdminClassStudent(classId: string, studentId: string): Promise<void> {
+  await apiClient.delete(
+    `/admin/classes/${encodeURIComponent(classId)}/students/${encodeURIComponent(studentId)}`
+  )
+}

@@ -61,6 +61,8 @@ const ENTITY_CONFIG: Record<AdminEntity, EntityConfig> = {
       { name: 'user_id', label: 'User ID', type: 'number', required: true },
       { name: 'name', label: 'Name', required: true },
       { name: 'employee_number', label: 'Employee number' },
+      { name: 'classes', label: 'Classes' },
+      { name: 'subjects', label: 'Subjects' },
     ],
   },
   students: {
@@ -103,15 +105,18 @@ function AdminMasterDataPage() {
   }>({ key: '', records: null, error: null })
   const [revision, setRevision] = useState(0)
   const [editing, setEditing] = useState<AdminDataRecord | null | undefined>(undefined)
-  const [formValues, setFormValues] = useState<Record<string, string>>({})
+  const [formValues, setFormValues] = useState<Record<string, any>>({})
   const [saving, setSaving] = useState(false)
-  const [actionError, setActionError] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [classOptions, setClassOptions] = useState<AdminDataRecord[]>([])
+  const [subjectOptions, setSubjectOptions] = useState<AdminDataRecord[]>([])
 
   useEffect(() => {
     let isActive = true
     const key = `${requestKey}:${revision}`
 
+    // Fetch main entity records
     getAdminRecords(entity)
       .then((records) => {
         if (isActive) setResult({ key, records, error: null })
@@ -120,11 +125,20 @@ function AdminMasterDataPage() {
         if (isActive) setResult({ key, records: null, error: parseApiError(error).message })
       })
 
-    return () => {
-      isActive = false
+    // Load class and subject options for teachers
+    if (entity === 'teachers') {
+      Promise.all([getAdminRecords('classes'), getAdminRecords('subjects')])
+        .then(([cls, sub]) => {
+          if (isActive) {
+            setClassOptions(cls ?? [])
+            setSubjectOptions(sub ?? [])
+          }
+        })
+        .catch((e) => console.error('Failed to load class/subject options', e))
     }
-  }, [entity, requestKey, revision])
 
+    return () => { isActive = false }
+  }, [entity, requestKey, revision])
   const currentKey = `${requestKey}:${revision}`
   const records = result.key === currentKey ? result.records : null
   const error = result.key === currentKey ? result.error : null
@@ -275,22 +289,70 @@ function AdminMasterDataPage() {
               {editing ? `Edit ${config.title}` : `Create ${config.title}`}
             </h2>
             <form className="space-y-4" onSubmit={(event) => void save(event)}>
-              {config.fields.map((field) => (
-                <label key={field.name} className="block space-y-1.5 text-sm font-medium text-ink">
-                  {field.label}
-                  <input
-                    type={field.type ?? 'text'}
-                    min={field.type === 'number' ? (field.name === 'grade_level' ? 1 : 1) : undefined}
-                    max={field.name === 'semester' ? 2 : field.name === 'grade_level' ? 20 : undefined}
-                    required={field.required}
-                    value={formValues[field.name] ?? ''}
-                    onChange={(event) =>
-                      setFormValues((values) => ({ ...values, [field.name]: event.target.value }))
-                    }
-                    className={inputClass}
-                  />
-                </label>
-              ))}
+              {config.fields.map((field) => {
+                if (field.name === 'classes') {
+                  return (
+                    <label key={field.name} className="block space-y-1.5 text-sm font-medium text-ink">
+                      {field.label}
+                      <select
+                        multiple
+                        value={formValues[field.name] ?? []}
+                        onChange={(event) => {
+                          const selected = Array.from(event.target.selectedOptions).map((opt) => opt.value)
+                          setFormValues((values) => ({ ...values, [field.name]: selected }))
+                        }}
+                        className={inputClass}
+                      >
+                        {classOptions.map((opt) => (
+                          <option key={opt.id} value={opt.id}>
+                            {String(opt.name ?? opt.id)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )
+                }
+
+                if (field.name === 'subjects') {
+                  return (
+                    <label key={field.name} className="block space-y-1.5 text-sm font-medium text-ink">
+                      {field.label}
+                      <select
+                        multiple
+                        value={formValues[field.name] ?? []}
+                        onChange={(event) => {
+                          const selected = Array.from(event.target.selectedOptions).map((opt) => opt.value)
+                          setFormValues((values) => ({ ...values, [field.name]: selected }))
+                        }}
+                        className={inputClass}
+                      >
+                        {subjectOptions.map((opt) => (
+                          <option key={opt.id} value={opt.id}>
+                            {String(opt.name ?? opt.id)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )
+                }
+
+                return (
+                  <label key={field.name} className="block space-y-1.5 text-sm font-medium text-ink">
+                    {field.label}
+                    <input
+                      type={field.type ?? 'text'}
+                      min={field.type === 'number' ? (field.name === 'grade_level' ? 1 : 1) : undefined}
+                      max={field.name === 'semester' ? 2 : field.name === 'grade_level' ? 20 : undefined}
+                      required={field.required}
+                      value={formValues[field.name] ?? ''}
+                      onChange={(event) =>
+                        setFormValues((values) => ({ ...values, [field.name]: event.target.value }))
+                      }
+                      className={inputClass}
+                    />
+                  </label>
+                )
+              })}
               {actionError && (
                 <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-700">
                   {actionError}
