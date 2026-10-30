@@ -157,11 +157,6 @@ export function ClassDetailView({
               Academic Year: <span className="font-medium text-ink">{classData.academic_year}</span> ·{' '}
               Total Enrolled:{' '}
               <span className="font-semibold text-primary">{students.length} students</span>
-              {students.length < 10 && (
-                <span className="ml-2 inline-flex items-center gap-1 text-xs text-warning font-medium">
-                  <AlertCircle className="size-3.5" /> Minimum 10 recommended
-                </span>
-              )}
             </p>
           </div>
 

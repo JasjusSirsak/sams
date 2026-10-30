@@ -171,16 +171,25 @@ export async function createRefreshSession(userId: bigint): Promise<{ token: str
 
   return { token, expiresAt }
 }
-
+//==================================================================
+// this one is
 export function requireSameOrigin(req: Request, res: Response, next: NextFunction) {
-  if (req.get('origin') !== APP_ORIGIN) {
-    return res.status(403).json({
-      success: false,
-      code: 'CSRF_REJECTED',
-      message: 'Request origin is not allowed.',
-    })
-  }
-  return next()
+    const currentHost = req.hostname; 
+    const originHeader = req.get('origin');
+
+    if (!originHeader) {
+        return res.status(403).json({ error: 'Forbidden: Missing Origin header' });
+    }
+    try {
+        const originUrl = new URL(originHeader);        
+        if (originUrl.hostname !== currentHost) {
+            return res.status(403).json({ error: 'Forbidden: Same-origin check failed' });
+        }
+
+        next();
+    } catch (error) {
+        return res.status(400).json({ error: 'Invalid Origin format' });
+    }
 }
 
 function normalizeRoleName(roleName: string): string {

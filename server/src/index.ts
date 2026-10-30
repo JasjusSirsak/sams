@@ -26,6 +26,7 @@ import {
 import { getActivePeriod } from './services/academicPeriod'
 
 const app = express()
+app.set('trust proxy', 1)
 const PORT = Number(process.env.PORT) || 3000
 
 // This fixes express-rate-limit error when X-Forwarded-For is present
