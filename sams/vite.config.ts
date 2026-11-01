@@ -13,14 +13,13 @@ export default defineConfig({
   server: {
     port: 5173,
     allowedHosts: [
-      '.trycloudflare.com' // Biarkan wildcard ini aktif agar semua domain trycloudflare diizinkan
+      '.trycloudflare.com' 
     ],
     proxy: {
       '/api': {
         target: 'http://localhost:3000',
         changeOrigin: true,
         secure: false,
-        // Tambahkan baris ini untuk meneruskan header asli dan mencegah 403 Forbidden dari proxy
         configure: (proxy, _options) => {
           proxy.on('proxyReq', (proxyReq, req, _res) => {
             proxyReq.setHeader('Origin', 'http://localhost:3000');
@@ -30,3 +29,4 @@ export default defineConfig({
     },
   },
 })
+//on? 

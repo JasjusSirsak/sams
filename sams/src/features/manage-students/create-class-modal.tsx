@@ -2,42 +2,59 @@
 
 import { useState, type FormEvent } from 'react'
 import { X, GraduationCap, AlertCircle, Plus, Info } from 'lucide-react'
-import { buttonPrimary, buttonSecondary, inputClass } from '@/components/ui-kit'
+import { buttonPrimary, buttonSecondary } from '@/components/ui-kit'
+import { ClassNameFields, type ClassNameFieldsValue } from './class-name-fields'
+import { parseApiError } from '@/lib/apiClient'
 
 export type CreateClassInput = {
   name: string
   grade_level: number
-  academic_year?: string
-  room?: string
+  academic_period_id: string
+  teacher_id: string
 }
 
 type CreateClassModalProps = {
   onClose: () => void
   onCreate: (newClass: CreateClassInput) => void | Promise<void>
-  isSubmitting?: boolean
 }
 
 export function CreateClassModal({ onClose, onCreate }: CreateClassModalProps) {
-  const [name, setName] = useState('')
-  const [gradeLevel, setGradeLevel] = useState<number>(10)
-  const [academicYear, setAcademicYear] = useState('2026/2027')
-  const [room, setRoom] = useState('')
+  const [classFields, setClassFields] = useState<ClassNameFieldsValue>({
+    name: '',
+    grade_level: '',
+    academic_period_id: '',
+    teacher_id: '',
+  })
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
-    if (!name.trim()) {
-      setErrorMsg('Please enter a class name.')
+    if (
+      !classFields.name ||
+      classFields.grade_level === '' ||
+      !classFields.academic_period_id ||
+      !classFields.teacher_id
+    ) {
+      setErrorMsg('Select a grade, class major, class parallel, academic period, and homeroom teacher.')
       return
     }
 
-    onCreate({
-      name: name.trim(),
-      grade_level: Number(gradeLevel),
-      academic_year: academicYear.trim(),
-      room: room.trim() || undefined,
-    })
-    onClose()
+    setErrorMsg(null)
+    setIsSubmitting(true)
+    try {
+      await onCreate({
+        name: classFields.name,
+        grade_level: classFields.grade_level,
+        academic_period_id: classFields.academic_period_id,
+        teacher_id: classFields.teacher_id,
+      })
+      onClose()
+    } catch (error: unknown) {
+      setErrorMsg(parseApiError(error).message)
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -63,6 +80,7 @@ export function CreateClassModal({ onClose, onCreate }: CreateClassModalProps) {
           <button
             type="button"
             onClick={onClose}
+            disabled={isSubmitting}
             className="rounded-xl p-1.5 text-muted hover:bg-surface-muted hover:text-ink transition"
             aria-label="Close modal"
           >
@@ -78,73 +96,22 @@ export function CreateClassModal({ onClose, onCreate }: CreateClassModalProps) {
             </div>
           )}
 
-          <label className="block space-y-1 text-xs font-medium text-ink">
-            Class Name <span className="text-danger">*</span>
-            <input
-              type="text"
-              required
-              placeholder="e.g. Class X-C or XII MIPA 3"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className={inputClass}
-            />
-          </label>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <label className="block space-y-1 text-xs font-medium text-ink">
-              Grade Level <span className="text-danger">*</span>
-              <select
-                value={gradeLevel}
-                onChange={(e) => setGradeLevel(Number(e.target.value))}
-                className={inputClass}
-              >
-                <option value={10}>Grade 10 (X)</option>
-                <option value={11}>Grade 11 (XI)</option>
-                <option value={12}>Grade 12 (XII)</option>
-                <option value={7}>Grade 7 (VII)</option>
-                <option value={8}>Grade 8 (VIII)</option>
-                <option value={9}>Grade 9 (IX)</option>
-              </select>
-            </label>
-
-            <label className="block space-y-1 text-xs font-medium text-ink">
-              Academic Year <span className="text-danger">*</span>
-              <input
-                type="text"
-                required
-                placeholder="2026/2027"
-                value={academicYear}
-                onChange={(e) => setAcademicYear(e.target.value)}
-                className={inputClass}
-              />
-            </label>
-          </div>
-
-          <label className="block space-y-1 text-xs font-medium text-ink">
-            Assigned Room / Lab (Optional)
-            <input
-              type="text"
-              placeholder="e.g. Room 204 or Lab Komputer 1"
-              value={room}
-              onChange={(e) => setRoom(e.target.value)}
-              className={inputClass}
-            />
-          </label>
+          <ClassNameFields onChange={setClassFields} />
 
           <div className="rounded-xl bg-primary-soft/60 border border-primary/20 p-3 flex items-start gap-2.5 text-xs text-primary dark:text-primary-foreground">
             <Info className="size-4 shrink-0 mt-0.5 text-primary" />
             <p className="text-muted leading-relaxed">
-              Once created, you can open this class to add students via <strong className="text-ink">Excel bulk upload</strong> or individual <strong className="text-ink">manual entries</strong>.
+              The selected academic period and homeroom teacher will be linked to this class. You can then add students via <strong className="text-ink">Excel bulk upload</strong> or individual <strong className="text-ink">manual entries</strong>.
             </p>
           </div>
 
           <div className="flex items-center justify-end gap-2 pt-2 border-t border-line">
-            <button type="button" onClick={onClose} className={buttonSecondary}>
+            <button type="button" onClick={onClose} disabled={isSubmitting} className={buttonSecondary}>
               Cancel
             </button>
-            <button type="submit" className={buttonPrimary}>
+            <button type="submit" disabled={isSubmitting} className={buttonPrimary}>
               <Plus className="size-4" />
-              Create Class
+              {isSubmitting ? 'Creating...' : 'Create Class'}
             </button>
           </div>
         </form>

@@ -11,6 +11,7 @@ type ClassCardProps = {
 
 export function ClassCard({ classItem, onClick }: ClassCardProps) {
   const isLowCount = classItem.student_count < 10
+  const hasNoStudents = classItem.student_count === 0
 
   return (
     <div
@@ -31,9 +32,18 @@ export function ClassCard({ classItem, onClick }: ClassCardProps) {
           <Pill className="bg-primary/10 text-primary border border-primary/20 font-semibold text-xs">
             Grade {classItem.grade_level}
           </Pill>
-          <span className="text-xs text-muted font-medium">
-            {classItem.academic_year}
-          </span>
+          <div className="flex items-center gap-2">
+            {classItem.academic_year && (
+              <span className="text-xs text-muted font-medium">
+                {classItem.academic_year}
+              </span>
+            )}
+            {hasNoStudents && (
+            <Pill className="bg-warning/15 text-warning border border-warning/30 font-semibold text-xs">
+              No students yet
+            </Pill>
+            )}
+          </div>
         </div>
 
         {/* Title */}

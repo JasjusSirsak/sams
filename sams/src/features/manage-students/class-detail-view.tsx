@@ -12,20 +12,25 @@ import {
   Calendar,
   Phone,
   MapPin,
-  Sparkles,
-  AlertCircle,
+  FileSpreadsheet,
+  KeyRound,
 } from 'lucide-react'
 import {
   Card,
   EmptyState,
-  PageHeader,
   Pill,
   buttonPrimary,
   buttonSecondary,
   inputClass,
 } from '@/components/ui-kit'
 import { AddStudentModal } from './add-student-modal'
-import type { AdminClassCatalogItem, AdminClassStudent } from '@/lib/api'
+import { EditStudentDrawer } from './edit-student-drawer'
+import type {
+  AdminClassCatalogItem,
+  AdminClassParentInput,
+  AdminClassStudent,
+} from '@/lib/api'
+import { parseApiError } from '@/lib/apiClient'
 
 type ClassDetailViewProps = {
   classData: AdminClassCatalogItem & { room?: string }
@@ -46,6 +51,19 @@ type ClassDetailViewProps = {
     address?: string
   }>) => Promise<void> | void
   onDeleteStudent: (studentId: string) => Promise<void> | void
+  onUpdateStudent: (studentId: string, student: {
+    nis: string
+    name: string
+    birth_date: string
+    phone_number: string
+    address: string
+    gender: string
+  }) => Promise<void> | void
+  onUpdateStudentParents: (
+    studentId: string,
+    parents: AdminClassParentInput[],
+  ) => Promise<void>
+  onResetPassword?: (studentId: string, studentNis: string) => Promise<void> | void
   isLoading?: boolean
 }
 
@@ -58,12 +76,18 @@ export function ClassDetailView({
   onAddStudentManual,
   onAddStudentsExcel,
   onDeleteStudent,
+  onUpdateStudent,
+  onUpdateStudentParents,
+  onResetPassword,
 }: ClassDetailViewProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [currentPage, setCurrentPage] = useState(0)
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
+  const [addModalInitialTab, setAddModalInitialTab] = useState<'excel' | 'manual'>('excel')
   const [editingStudent, setEditingStudent] = useState<AdminClassStudent | null>(null)
+  const [isSavingStudent, setIsSavingStudent] = useState(false)
+  const [editStudentError, setEditStudentError] = useState<string | null>(null)
 
   // Filter students by search (NIS, Name, Address, Phone) & Status
   const q = searchQuery.toLowerCase().trim()
@@ -109,14 +133,36 @@ export function ClassDetailView({
     onAddStudentsExcel(dataList)
   }
 
+  const handleSaveStudent = async (student: {
+    nis: string
+    name: string
+    birth_date: string
+    phone_number: string
+    address: string
+    gender: string
+  }) => {
+    if (!editingStudent) return
+
+    setIsSavingStudent(true)
+    setEditStudentError(null)
+    try {
+      await onUpdateStudent(editingStudent.id, student)
+      setEditingStudent(null)
+    } catch (error: unknown) {
+      setEditStudentError(parseApiError(error).message)
+    } finally {
+      setIsSavingStudent(false)
+    }
+  }
+
   const getStatusBadge = (status: AdminClassStudent['account_status']) => {
     switch (status) {
       case 'Active':
         return <Pill className="bg-success/15 text-success font-medium">Active</Pill>
-      case 'Pending':
-        return <Pill className="bg-warning/15 text-warning font-medium">Pending</Pill>
       case 'Inactive':
         return <Pill className="bg-danger/15 text-danger font-medium">Inactive</Pill>
+      case 'No account':
+        return <Pill className="bg-muted/15 text-muted font-medium">No account</Pill>
       default:
         return <Pill className="bg-muted/15 text-muted">{status}</Pill>
     }
@@ -201,8 +247,8 @@ export function ClassDetailView({
             >
               <option value="all">All Statuses</option>
               <option value="Active">Active</option>
-              <option value="Pending">Pending</option>
               <option value="Inactive">Inactive</option>
+              <option value="No account">No account</option>
             </select>
           </div>
         </div>
@@ -213,14 +259,30 @@ export function ClassDetailView({
             title="No students in this class yet"
             text="Get started by enrolling students via bulk Excel upload or using the manual form."
             action={
-              <button
-                type="button"
-                onClick={() => setIsAddModalOpen(true)}
-                className={`${buttonPrimary} mt-2 text-xs py-2`}
-              >
-                <UserPlus className="size-3.5" />
-                Add Students Now
-              </button>
+              <div className="flex flex-col sm:flex-row gap-3 mt-4">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAddModalInitialTab('excel')
+                    setIsAddModalOpen(true)
+                  }}
+                  className={`${buttonPrimary} text-sm py-2.5 px-6`}
+                >
+                  <FileSpreadsheet className="size-4 mr-2" />
+                  Upload Excel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAddModalInitialTab('manual')
+                    setIsAddModalOpen(true)
+                  }}
+                  className={`${buttonSecondary} text-sm py-2.5 px-6`}
+                >
+                  <UserPlus className="size-4 mr-2" />
+                  Add Manually
+                </button>
+              </div>
             }
           />
         ) : filtered.length === 0 ? (
@@ -244,7 +306,7 @@ export function ClassDetailView({
           <>
             {/* Student Table: Removed "User ID" Column per requirement */}
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[700px] text-sm">
+              <table className="w-full min-w-[900px] text-sm">
                 <thead>
                   <tr className="border-b border-line text-left text-xs uppercase tracking-wider text-muted">
                     <th className="px-3 py-3.5 font-medium">Student Number (NIS)</th>
@@ -253,6 +315,7 @@ export function ClassDetailView({
                     <th className="px-3 py-3.5 font-medium">Phone Number</th>
                     <th className="px-3 py-3.5 font-medium">Address</th>
                     <th className="px-3 py-3.5 font-medium">Account Status</th>
+                    <th className="px-3 py-3.5 font-medium">Parent Status</th>
                     <th className="px-3 py-3.5 text-right font-medium">Actions</th>
                   </tr>
                 </thead>
@@ -289,16 +352,40 @@ export function ClassDetailView({
                       <td className="px-3 py-3.5">
                         {getStatusBadge(student.account_status)}
                       </td>
+                      <td className="px-3 py-3.5">
+                        {student.parent_status === 'Active' ? (
+                          <Pill className="bg-success/15 text-success font-medium">Active</Pill>
+                        ) : (
+                          <Pill className="bg-muted/15 text-muted font-medium">Non-Active</Pill>
+                        )}
+                      </td>
                       <td className="px-3 py-3.5 text-right">
                         <div className="inline-flex items-center gap-1.5">
                           <button
                             type="button"
-                            onClick={() => setEditingStudent(student)}
+                            onClick={() => {
+                              setEditStudentError(null)
+                              setEditingStudent(student)
+                            }}
                             title="Edit student"
                             className="inline-flex items-center justify-center size-8 rounded-xl border border-line bg-surface text-ink hover:bg-surface-muted transition"
                           >
                             <Pencil className="size-3.5" />
                           </button>
+                          {onResetPassword && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (window.confirm(`Reset password for ${student.name}? This will generate a new random password.`)) {
+                                  onResetPassword(student.id, student.nis)
+                                }
+                              }}
+                              title="Reset password"
+                              className="inline-flex items-center justify-center size-8 rounded-xl border border-primary/30 text-primary hover:bg-primary/10 transition"
+                            >
+                              <KeyRound className="size-3.5" />
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => onDeleteStudent(student.id)}
@@ -362,73 +449,22 @@ export function ClassDetailView({
           onClose={() => setIsAddModalOpen(false)}
           onAddManual={handleManualAdd}
           onAddExcel={handleExcelAdd}
+          initialTab={addModalInitialTab}
         />
       )}
 
-      {/* Edit Student Simple Inline Modal */}
+      {/* Edit Student Drawer */}
       {editingStudent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-md rounded-2xl bg-surface border border-line shadow-2xl p-6 space-y-4">
-            <h3 className="text-base font-bold text-ink">Edit Student: {editingStudent.name}</h3>
-            <div className="space-y-3">
-              <label className="block text-xs font-medium text-ink">
-                Student Name
-                <input
-                  type="text"
-                  value={editingStudent.name}
-                  onChange={(e) =>
-                    setEditingStudent({ ...editingStudent, name: e.target.value })
-                  }
-                  className={inputClass}
-                />
-              </label>
-              <label className="block text-xs font-medium text-ink">
-                Phone Number
-                <input
-                  type="text"
-                  value={editingStudent.phone_number}
-                  onChange={(e) =>
-                    setEditingStudent({ ...editingStudent, phone_number: e.target.value })
-                  }
-                  className={inputClass}
-                />
-              </label>
-              <label className="block text-xs font-medium text-ink">
-                Account Status
-                <select
-                  value={editingStudent.account_status}
-                  onChange={(e) =>
-                    setEditingStudent({
-                      ...editingStudent,
-                      account_status: e.target.value as AdminClassStudent['account_status'],
-                    })
-                  }
-                  className={inputClass}
-                >
-                  <option value="Active">Active</option>
-                  <option value="Pending">Pending</option>
-                  <option value="Inactive">Inactive</option>
-                </select>
-              </label>
-            </div>
-            <div className="flex justify-end gap-2 pt-2 border-t border-line">
-              <button
-                type="button"
-                onClick={() => setEditingStudent(null)}
-                className={buttonSecondary}
-              >
-                Close
-              </button>
-              <button
-                type="button"
-                onClick={() => setEditingStudent(null)}
-                className={buttonPrimary}
-              >
-                Save Changes
-              </button>
-            </div>
-          </div>
-        </div>
+        <EditStudentDrawer
+          student={editingStudent}
+          onClose={() => setEditingStudent(null)}
+          onSaveStudent={handleSaveStudent}
+          onSaveParents={(parents) =>
+            onUpdateStudentParents(editingStudent.id, parents)
+          }
+          isSaving={isSavingStudent}
+          error={editStudentError}
+        />
       )}
     </div>
   )

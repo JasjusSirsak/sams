@@ -7,13 +7,18 @@ import { useRouter, usePathname } from '@/lib/nav'
 import { ClassCard } from '@/features/manage-students/class-card'
 import { ClassDetailView } from '@/features/manage-students/class-detail-view'
 import { CreateClassModal, type CreateClassInput } from '@/features/manage-students/create-class-modal'
+import { CredentialsModal } from '@/features/manage-students/credentials-modal'
 import {
   getAdminClassCatalog,
   getAdminClassStudents,
   addAdminClassStudents,
   removeAdminClassStudent,
   createAdminRecord,
+  updateAdminRecord,
+  resetStudentPassword,
+  saveAdminStudentParents,
   type AdminClassCatalogItem,
+  type AdminClassParentInput,
   type AdminClassStudent,
 } from '@/lib/api'
 import { parseApiError } from '@/lib/apiClient'
@@ -31,6 +36,7 @@ export default function ManageStudentsPage() {
   // Filters
   const [searchQuery, setSearchQuery] = useState('')
   const [gradeFilter, setGradeFilter] = useState<string>('all')
+  const [studentCountFilter, setStudentCountFilter] = useState<string>('all')
   const [isCreateClassOpen, setIsCreateClassOpen] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
 
@@ -43,6 +49,14 @@ export default function ManageStudentsPage() {
   const [isLoadingDetail, setIsLoadingDetail] = useState(false)
   const [detailError, setDetailError] = useState<string | null>(null)
   const [detailRevision, setDetailRevision] = useState(0)
+
+  // Credentials modal state
+  const [credentialsModal, setCredentialsModal] = useState<{
+    identifier: string
+    identifierLabel: string
+    password: string
+    accountType: 'Student' | 'Parent'
+  }[] | null>(null)
 
   // 1. Fetch Class Catalog
   useEffect(() => {
@@ -106,7 +120,11 @@ export default function ManageStudentsPage() {
   const filteredClasses = classes.filter((cls) => {
     const matchesSearch = !q || cls.name.toLowerCase().includes(q)
     const matchesGrade = gradeFilter === 'all' || cls.grade_level.toString() === gradeFilter
-    return matchesSearch && matchesGrade
+    const matchesStudentCount =
+      studentCountFilter === 'all' ||
+      (studentCountFilter === 'no-students' && cls.student_count === 0) ||
+      (studentCountFilter === 'has-students' && cls.student_count > 0)
+    return matchesSearch && matchesGrade && matchesStudentCount
   })
 
   // Handlers
@@ -122,14 +140,21 @@ export default function ManageStudentsPage() {
   const handleCreateClass = async (newClassData: CreateClassInput) => {
     setActionError(null)
     try {
-      await createAdminRecord('classes', {
+      const result = await createAdminRecord('classes', {
         name: newClassData.name,
         grade_level: String(newClassData.grade_level),
+        academic_period_id: newClassData.academic_period_id,
+        teacher_id: newClassData.teacher_id,
       })
       // Refresh catalog list
       setCatalogRevision((v) => v + 1)
+      // Navigate to the newly created class detail page
+      if (result && result.id) {
+        router.push(`/admin/students/${result.id}`)
+      }
     } catch (err: unknown) {
       setActionError(parseApiError(err).message)
+      throw err
     }
   }
 
@@ -143,9 +168,19 @@ export default function ManageStudentsPage() {
     if (!currentClassId) return
     setActionError(null)
     try {
-      await addAdminClassStudents(currentClassId, [newStudent])
+      const response = await addAdminClassStudents(currentClassId, [newStudent])
       setDetailRevision((v) => v + 1)
       setCatalogRevision((v) => v + 1)
+
+      // Show credentials modal if a password was returned (newly created student)
+      if (response.data && response.data.length > 0 && response.data[0].initial_password) {
+        setCredentialsModal([{
+          identifier: response.data[0].nis,
+          identifierLabel: 'NIS',
+          password: response.data[0].initial_password,
+          accountType: 'Student',
+        }])
+      }
     } catch (err: unknown) {
       setActionError(parseApiError(err).message)
     }
@@ -163,9 +198,22 @@ export default function ManageStudentsPage() {
     if (!currentClassId) return
     setActionError(null)
     try {
-      await addAdminClassStudents(currentClassId, newStudents)
+      const response = await addAdminClassStudents(currentClassId, newStudents)
       setDetailRevision((v) => v + 1)
       setCatalogRevision((v) => v + 1)
+
+      // For Excel uploads, show credentials for the first student with a password
+      if (response.data && response.data.length > 0) {
+        const firstWithPassword = response.data.find((s) => s.initial_password)
+        if (firstWithPassword?.initial_password) {
+          setCredentialsModal([{
+            identifier: firstWithPassword.nis,
+            identifierLabel: 'NIS',
+            password: firstWithPassword.initial_password,
+            accountType: 'Student',
+          }])
+        }
+      }
     } catch (err: unknown) {
       setActionError(parseApiError(err).message)
     }
@@ -178,6 +226,66 @@ export default function ManageStudentsPage() {
       await removeAdminClassStudent(currentClassId, studentId)
       setDetailRevision((v) => v + 1)
       setCatalogRevision((v) => v + 1)
+    } catch (err: unknown) {
+      setActionError(parseApiError(err).message)
+    }
+  }
+
+  const handleUpdateStudent = async (
+    studentId: string,
+    student: {
+      nis: string
+      name: string
+      birth_date: string
+      phone_number: string
+      address: string
+      gender: string
+    },
+  ) => {
+    setActionError(null)
+    try {
+      await updateAdminRecord('students', studentId, student)
+      setDetailRevision((v) => v + 1)
+    } catch (err: unknown) {
+      setActionError(parseApiError(err).message)
+      throw err
+    }
+  }
+
+  const handleUpdateStudentParents = async (
+    studentId: string,
+    parents: AdminClassParentInput[],
+  ) => {
+    setActionError(null)
+    try {
+      const response = await saveAdminStudentParents(studentId, parents)
+      setDetailRevision((v) => v + 1)
+      if (response.data.credentials.length > 0) {
+        setCredentialsModal(
+          response.data.credentials.map((credential) => ({
+            identifier: credential.username,
+            identifierLabel: 'Username',
+            password: credential.password,
+            accountType: 'Parent',
+          })),
+        )
+      }
+    } catch (err: unknown) {
+      setActionError(parseApiError(err).message)
+      throw err
+    }
+  }
+
+  const handleResetPassword = async (studentId: string, _studentNis: string) => {
+    setActionError(null)
+    try {
+      const response = await resetStudentPassword(studentId)
+      setCredentialsModal([{
+        identifier: response.data.nis,
+        identifierLabel: 'NIS',
+        password: response.data.initial_password,
+        accountType: 'Student',
+      }])
     } catch (err: unknown) {
       setActionError(parseApiError(err).message)
     }
@@ -241,6 +349,9 @@ export default function ManageStudentsPage() {
             onAddStudentManual={handleAddManualStudent}
             onAddStudentsExcel={handleAddExcelStudents}
             onDeleteStudent={handleDeleteStudent}
+            onUpdateStudent={handleUpdateStudent}
+            onUpdateStudentParents={handleUpdateStudentParents}
+            onResetPassword={handleResetPassword}
             isLoading={isLoadingDetail}
           />
         </div>
@@ -310,6 +421,21 @@ export default function ManageStudentsPage() {
             <option value="9">Grade 9</option>
           </select>
         </div>
+
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-medium text-muted flex items-center gap-1">
+            <Filter className="size-3" /> Students:
+          </span>
+          <select
+            value={studentCountFilter}
+            onChange={(e) => setStudentCountFilter(e.target.value)}
+            className="rounded-xl border border-line bg-surface px-3 py-2 text-xs font-medium text-ink focus:border-primary focus:outline-none"
+          >
+            <option value="all">All</option>
+            <option value="no-students">No students yet</option>
+            <option value="has-students">Has students</option>
+          </select>
+        </div>
       </div>
 
       {/* Classes Grid */}
@@ -355,6 +481,7 @@ export default function ManageStudentsPage() {
               onClick={() => {
                 setSearchQuery('')
                 setGradeFilter('all')
+                setStudentCountFilter('all')
               }}
               className="mt-2 text-xs font-medium text-primary hover:underline"
             >
@@ -379,6 +506,14 @@ export default function ManageStudentsPage() {
         <CreateClassModal
           onClose={() => setIsCreateClassOpen(false)}
           onCreate={handleCreateClass}
+        />
+      )}
+
+      {/* Credentials Modal */}
+      {credentialsModal && (
+        <CredentialsModal
+          credentials={credentialsModal}
+          onClose={() => setCredentialsModal(null)}
         />
       )}
     </div>

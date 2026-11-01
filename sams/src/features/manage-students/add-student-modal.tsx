@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, type DragEvent, type ChangeEvent, type FormEvent } from 'react'
+import { useState, useEffect, type DragEvent, type ChangeEvent, type FormEvent } from 'react'
 import { X, Upload, FileSpreadsheet, Plus, AlertCircle, CheckCircle2 } from 'lucide-react'
 import { buttonPrimary, buttonSecondary, inputClass, Pill } from '@/components/ui-kit'
 import type { AdminClassStudent } from '@/lib/api'
@@ -11,7 +11,6 @@ type StudentInput = {
   birth_date?: string
   phone_number?: string
   address?: string
-  account_status?: 'Active' | 'Pending' | 'Inactive'
 }
 
 type AddStudentModalProps = {
@@ -19,6 +18,7 @@ type AddStudentModalProps = {
   onClose: () => void
   onAddManual: (student: StudentInput) => void | Promise<void>
   onAddExcel: (students: StudentInput[]) => void | Promise<void>
+  initialTab?: 'excel' | 'manual'
 }
 
 export function AddStudentModal({
@@ -26,8 +26,14 @@ export function AddStudentModal({
   onClose,
   onAddManual,
   onAddExcel,
+  initialTab = 'excel',
 }: AddStudentModalProps) {
-  const [activeTab, setActiveTab] = useState<'excel' | 'manual'>('excel')
+  const [activeTab, setActiveTab] = useState<'excel' | 'manual'>(initialTab)
+
+  // Update activeTab when initialTab changes (for when modal opens with different tab)
+  useEffect(() => {
+    setActiveTab(initialTab)
+  }, [initialTab])
   const [isDragging, setIsDragging] = useState(false)
   const [uploadedFile, setUploadedFile] = useState<File | null>(null)
   const [excelSuccessMsg, setExcelSuccessMsg] = useState<string | null>(null)
@@ -40,7 +46,6 @@ export function AddStudentModal({
     birth_date: '',
     phone_number: '',
     address: '',
-    account_status: 'Active' as const,
   })
 
   // Drag & drop handlers
@@ -86,39 +91,10 @@ export function AddStudentModal({
       return
     }
 
-    // Mock parsed students from Excel
-    const mockParsed: Omit<MockStudent, 'id'>[] = [
-      {
-        nis: `NIS-2026-${Math.floor(100 + Math.random() * 900)}`,
-        name: 'Arga Putra Perkasa',
-        birth_date: '2010-03-15',
-        phone_number: '+6281234567890',
-        address: 'Jl. Merdeka No. 100, Bandung',
-        account_status: 'Active',
-      },
-      {
-        nis: `NIS-2026-${Math.floor(100 + Math.random() * 900)}`,
-        name: 'Belinda Kartika',
-        birth_date: '2010-07-22',
-        phone_number: '+6281298765432',
-        address: 'Jl. Surya Sumantri No. 12, Bandung',
-        account_status: 'Active',
-      },
-      {
-        nis: `NIS-2026-${Math.floor(100 + Math.random() * 900)}`,
-        name: 'Caraka Yudha',
-        birth_date: '2009-11-04',
-        phone_number: '+6281311223344',
-        address: 'Jl. Asia Afrika No. 45, Bandung',
-        account_status: 'Pending',
-      },
-    ]
-
-    setExcelSuccessMsg(`Successfully extracted ${mockParsed.length} student records from ${uploadedFile.name}.`)
-    setTimeout(() => {
-      onAddExcel(mockParsed)
-      onClose()
-    }, 900)
+    // TODO: Implement actual Excel parsing
+    // For now, this will need to be handled by the parent component
+    // The parent should parse the file and call onAddExcel with the parsed data
+    setErrorMsg('Excel parsing not yet implemented. Please use manual entry.')
   }
 
   const handleManualSubmit = (e: FormEvent) => {
@@ -322,24 +298,6 @@ export function AddStudentModal({
                   onChange={(e) => setManualForm({ ...manualForm, address: e.target.value })}
                   className={inputClass}
                 />
-              </label>
-
-              <label className="block space-y-1 text-xs font-medium text-ink">
-                Account Status
-                <select
-                  value={manualForm.account_status}
-                  onChange={(e) =>
-                    setManualForm({
-                      ...manualForm,
-                      account_status: e.target.value as 'Active' | 'Pending' | 'Inactive',
-                    })
-                  }
-                  className={inputClass}
-                >
-                  <option value="Active">Active</option>
-                  <option value="Pending">Pending</option>
-                  <option value="Inactive">Inactive</option>
-                </select>
               </label>
             </form>
           )}

@@ -3,6 +3,7 @@ import { AuthProvider, useApp } from './lib/app-context'
 import { NavProvider, usePathname, useRouter } from './lib/nav'
 import { AppShell } from './components/layout/app-shell'
 import { Forbidden, Spinner } from './components/ui-kit'
+import { AdminDashboard } from './components/dashboard/admin-dashboard'
 import { ParentDashboard, StudentDashboard, TeacherDashboard } from './components/dashboard/dashboards'
 import LoginPage from './pages/login/login'
 import AgendaPage from './pages/agenda/page'
@@ -82,7 +83,8 @@ export function PublicOnlyRoute({ children }: { children: ReactNode }) {
 
 function DashboardPage() {
   const { role } = useApp()
-  if (role === 'admin' || role === 'staff') return <AdminMasterDataPage />
+  if (role === 'admin') return <AdminDashboard />
+  if (role === 'staff') return <AdminMasterDataPage />
   if (role === 'parent') return <ParentDashboard />
   if (role === 'teacher') return <TeacherDashboard />
   return <StudentDashboard />

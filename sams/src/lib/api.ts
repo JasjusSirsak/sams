@@ -484,8 +484,14 @@ export async function getAdminRecords(entity: AdminEntity): Promise<AdminDataRec
   return response.data.data
 }
 
-export async function createAdminRecord(entity: AdminEntity, data: Record<string, string>): Promise<void> {
-  await apiClient.post(`/admin/${entity}`, data)
+export async function getAdminHomeroomTeachers(): Promise<AdminDataRecord[]> {
+  const response = await apiClient.get<{ data: AdminDataRecord[] }>('/admin/class-homeroom-teachers')
+  return response.data.data
+}
+
+export async function createAdminRecord(entity: AdminEntity, data: Record<string, string>): Promise<AdminDataRecord> {
+  const response = await apiClient.post<{ data: AdminDataRecord }>(`/admin/${entity}`, data)
+  return response.data.data
 }
 
 export async function updateAdminRecord(
@@ -506,6 +512,32 @@ export interface AdminClassCatalogItem {
   grade_level: number
   academic_year: string
   student_count: number
+  room: string | null
+}
+
+export interface AdminDashboardSummary {
+  stats: {
+    students: number
+    teachers: number
+    classes: number
+    parents: number
+  }
+  recent_agendas: Array<{
+    id: string
+    title: string
+    date: string
+    type: string
+  }>
+  recent_students: Array<{
+    id: string
+    nis: string
+    name: string
+  }>
+}
+
+export async function getAdminDashboardSummary(): Promise<AdminDashboardSummary> {
+  const response = await apiClient.get<{ data: AdminDashboardSummary }>('/admin/dashboard')
+  return response.data.data
 }
 
 export interface AdminClassStudent {
@@ -516,7 +548,36 @@ export interface AdminClassStudent {
   birth_date: string
   phone_number: string
   address: string
-  account_status: 'Active' | 'Pending' | 'Inactive'
+  gender?: string
+  account_status: 'Active' | 'Inactive' | 'No account'
+  parent_status?: 'Active' | 'Non-Active'
+  parents?: AdminClassParent[]
+  initial_password?: string // Only included for newly created students
+}
+
+export interface AdminClassParent {
+  id: string
+  name: string
+  username: string
+  relationship_type: string | null
+  phone_number: string
+  address: string
+  is_active: boolean
+}
+
+export interface AdminClassParentInput {
+  parent_id?: string
+  name: string
+  username: string
+  temporary_password?: string
+  relationship_type: string
+  phone_number: string
+  address: string
+}
+
+export interface AdminParentCredential {
+  username: string
+  password: string
 }
 
 export interface AdminClassDetailData {
@@ -557,4 +618,34 @@ export async function removeAdminClassStudent(classId: string, studentId: string
   await apiClient.delete(
     `/admin/classes/${encodeURIComponent(classId)}/students/${encodeURIComponent(studentId)}`
   )
+}
+
+export async function saveAdminStudentParents(
+  studentId: string,
+  parents: AdminClassParentInput[],
+): Promise<{ message: string; data: { credentials: AdminParentCredential[] } }> {
+  const response = await apiClient.put<{
+    message: string
+    data: { credentials: AdminParentCredential[] }
+  }>(`/admin/students/${encodeURIComponent(studentId)}/parents`, { parents })
+  return response.data
+}
+
+export async function resetStudentPassword(studentId: string): Promise<{
+  message: string
+  data: {
+    student_id: string
+    nis: string
+    initial_password: string
+  }
+}> {
+  const response = await apiClient.post<{
+    message: string
+    data: {
+      student_id: string
+      nis: string
+      initial_password: string
+    }
+  }>(`/admin/students/${encodeURIComponent(studentId)}/reset-password`)
+  return response.data
 }

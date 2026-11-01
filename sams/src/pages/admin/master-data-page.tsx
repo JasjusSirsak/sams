@@ -13,6 +13,7 @@ import {
 import { parseApiError } from '@/lib/apiClient'
 import { usePathname } from '@/lib/nav'
 import { Card, EmptyState, PageHeader, Spinner, buttonPrimary, buttonSecondary, inputClass } from '@/components/ui-kit'
+import { ClassNameFields } from '@/features/manage-students/class-name-fields'
 
 type Field = {
   name: string
@@ -71,7 +72,6 @@ const ENTITY_CONFIG: Record<AdminEntity, EntityConfig> = {
     fields: [
       { name: 'nis', label: 'Student number (NIS)', required: true },
       { name: 'name', label: 'Name', required: true },
-      { name: 'user_id', label: 'User ID', type: 'number' },
       { name: 'birth_date', label: 'Birth date', type: 'date' },
       { name: 'phone_number', label: 'Phone number' },
       { name: 'address', label: 'Address' },
@@ -158,6 +158,15 @@ function AdminMasterDataPage() {
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (
+      entity === 'classes' &&
+      !editing &&
+      (!formValues.name || !formValues.grade_level || !formValues.academic_period_id || !formValues.teacher_id)
+    ) {
+      setActionError('Select a grade, class major, class parallel, academic period, and homeroom teacher.')
+      return
+    }
+
     setSaving(true)
     setActionError(null)
     try {
@@ -289,7 +298,24 @@ function AdminMasterDataPage() {
               {editing ? `Edit ${config.title}` : `Create ${config.title}`}
             </h2>
             <form className="space-y-4" onSubmit={(event) => void save(event)}>
+              {entity === 'classes' && !editing && (
+                <ClassNameFields
+                  onChange={({ name, grade_level, academic_period_id, teacher_id }) =>
+                    setFormValues((values) => ({
+                      ...values,
+                      name,
+                      grade_level: grade_level === '' ? '' : String(grade_level),
+                      academic_period_id,
+                      teacher_id,
+                    }))
+                  }
+                />
+              )}
               {config.fields.map((field) => {
+                if (entity === 'classes' && !editing && (field.name === 'name' || field.name === 'grade_level')) {
+                  return null
+                }
+
                 if (field.name === 'classes') {
                   return (
                     <label key={field.name} className="block space-y-1.5 text-sm font-medium text-ink">
