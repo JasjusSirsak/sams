@@ -3,6 +3,7 @@ import { stat } from 'node:fs/promises'
 import path from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { Router, type Request, type Response } from 'express'
+import { z } from 'zod'
 import { fileTypeFromFile } from 'file-type'
 import prisma from './db'
 import { requireAuth, requireRole } from './auth'
@@ -21,6 +22,16 @@ const attendanceRouter = Router()
 const EVIDENCE_FILENAME_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(jpg|png)$/i
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+const staffExceptionSchema = z.object({
+  class_id: z.string().regex(/^[1-9]\d*$/),
+  student_id: z.string().regex(/^[1-9]\d*$/),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
+    const parsedDate = new Date(`${value}T00:00:00.000Z`)
+    return !Number.isNaN(parsedDate.getTime()) && parsedDate.toISOString().slice(0, 10) === value
+  }),
+  status: z.enum(['PERMITTED', 'SICK']),
+  note: z.string().trim().min(1).max(2000),
+})
 
 function sendResult(res: Response, serviceResult: ServiceResult) {
   return res.status(serviceResult.statusCode).json(serviceResult.body)
@@ -205,6 +216,159 @@ attendanceRouter.get(
       return sendInternalError(res, 'Failed to fetch class attendance:', error)
     }
   }
+)
+
+attendanceRouter.post(
+  '/staff-exception',
+  requireAuth,
+  requireRole('staff'),
+  async (req: Request, res: Response) => {
+    const parsedInput = staffExceptionSchema.safeParse(req.body)
+    if (!parsedInput.success) {
+      return res.status(400).json({
+        message: parsedInput.error.issues[0]?.message ?? 'Invalid attendance exception data.',
+      })
+    }
+
+    const input = parsedInput.data
+    const classId = BigInt(input.class_id)
+    const studentId = BigInt(input.student_id)
+    const attendanceDate = new Date(`${input.date}T00:00:00.000Z`)
+
+    try {
+      const period = await getActivePeriod(attendanceDate)
+      if (!period || attendanceDate < period.start_date || attendanceDate > period.end_date) {
+        return res.status(400).json({
+          message: 'The selected date is outside an active academic period.',
+        })
+      }
+
+      const notificationCount = await prisma.$transaction(async (transaction) => {
+        const enrollment = await transaction.student_enrollments.findFirst({
+          where: {
+            student_id: studentId,
+            class_id: classId,
+            academic_period_id: period.academic_period_id,
+          },
+          select: {
+            enrollment_id: true,
+            students: { select: { name: true } },
+          },
+        })
+        if (!enrollment) return null
+
+        const session = await transaction.attendance_sessions.upsert({
+          where: {
+            class_id_attendance_date: {
+              class_id: classId,
+              attendance_date: attendanceDate,
+            },
+          },
+          update: {},
+          create: {
+            class_id: classId,
+            attendance_date: attendanceDate,
+            created_by: BigInt(req.user!.userId),
+          },
+          select: { attendance_session_id: true },
+        })
+
+        await transaction.attendance_records.upsert({
+          where: {
+            attendance_session_id_student_id: {
+              attendance_session_id: session.attendance_session_id,
+              student_id: studentId,
+            },
+          },
+          update: {
+            status: input.status,
+            note: input.note,
+            approval_status: 'PENDING',
+            approved_by: null,
+            approved_at: null,
+          },
+          create: {
+            attendance_session_id: session.attendance_session_id,
+            student_id: studentId,
+            status: input.status,
+            note: input.note,
+            approval_status: 'PENDING',
+          },
+          select: {
+            attendance_record_id: true,
+            attendance_session_id: true,
+            status: true,
+            note: true,
+            approval_status: true,
+          },
+        })
+
+        const [parentRelations, homeroomAssignment] = await Promise.all([
+          transaction.parent_students.findMany({
+            where: { student_id: studentId },
+            select: {
+              parents: {
+                select: {
+                  user_id: true,
+                  users: { select: { is_active: true } },
+                },
+              },
+            },
+          }),
+          transaction.homeroom_assignments.findFirst({
+            where: {
+              class_id: classId,
+              academic_period_id: period.academic_period_id,
+            },
+            select: {
+              teachers: {
+                select: {
+                  user_id: true,
+                  users: { select: { is_active: true } },
+                },
+              },
+            },
+          }),
+        ])
+        const recipientIds = new Set(
+          parentRelations
+            .filter(({ parents }) => parents.users.is_active)
+            .map(({ parents }) => parents.user_id.toString()),
+        )
+        if (homeroomAssignment?.teachers.users.is_active) {
+          recipientIds.add(homeroomAssignment.teachers.user_id.toString())
+        }
+
+        if (recipientIds.size > 0) {
+          const statusLabel = input.status === 'SICK' ? 'sick' : 'permission'
+          const notifClient = (transaction as any).notifications;
+          if (notifClient && typeof notifClient.createMany === 'function') await notifClient.createMany({
+            data: [...recipientIds].map((recipientId) => ({
+              user_id: BigInt(recipientId),
+              type: 'attendance_exception',
+              title: `Attendance ${statusLabel} recorded`,
+              message: `${enrollment.students.name} was marked as ${statusLabel} on ${input.date}.`,
+            })),
+          })
+        }
+
+        return recipientIds.size
+      })
+
+      if (notificationCount === null) {
+        return res.status(404).json({
+          message: 'The student is not enrolled in this class for the selected academic period.',
+        })
+      }
+
+      return res.json({
+        message: 'Attendance exception and in-app notifications saved successfully.',
+        data: { notified_recipients: notificationCount },
+      })
+    } catch (error) {
+      return sendInternalError(res, 'Failed to save Staff attendance exception:', error)
+    }
+  },
 )
 
 attendanceRouter.post(

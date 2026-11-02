@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from 'express'
 import { requireAuth, requireRole } from './auth'
-import { getGradesByClassAndSubject, saveGrades } from './services/gradesService'
+import { deleteGrades, getGradesByClassAndSubject, saveGrades } from './services/gradesService'
 
 const gradesRouter = Router()
 
@@ -22,6 +22,19 @@ gradesRouter.post(
       return sendResult(res, await saveGrades(req.body, req.user!))
     } catch (error) {
       return sendInternalError(res, 'Failed to save student grades:', error)
+    }
+  }
+)
+
+gradesRouter.delete(
+  '/',
+  requireAuth,
+  requireRole('teacher'),
+  async (req: Request, res: Response) => {
+    try {
+      return sendResult(res, await deleteGrades(req.body, req.user!))
+    } catch (error) {
+      return sendInternalError(res, 'Failed to delete student grades:', error)
     }
   }
 )

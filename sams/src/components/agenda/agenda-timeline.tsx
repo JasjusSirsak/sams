@@ -49,11 +49,7 @@ function toAgendaItems(groups: DatedSharedAgendaItems[]): (AgendaItem & { displa
     items.map((item) => ({
       id: item.id,
       date,
-      time: item.startTime
-        ? item.endTime
-          ? `${item.startTime} - ${item.endTime}`
-          : item.startTime
-        : 'All day',
+      time: item.startTime && item.endTime ? `${item.startTime} - ${item.endTime}` : 'All day',
       title: item.title,
       place: item.location ?? item.className ?? '',
       category: agendaCategory(item.label, item.source),

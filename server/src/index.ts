@@ -16,6 +16,8 @@ import parentRouter from './parentRouter'
 import reportsRouter from './reportsRouter'
 import adminRouter from './adminRouter'
 import agendaRouter from './agendaRouter'
+import classSchedulesRouter from './classSchedulesRouter'
+import notificationsRouter from './notificationsRouter'
 import {
   AUTH_COOKIE_NAME,
   REFRESH_COOKIE_NAME,
@@ -71,6 +73,9 @@ app.use('/api/auth/login', authLimiter)
 // Authentication module routing
 app.use('/api/auth', authRouter)
 
+// Persisted in-app notifications for authenticated users.
+app.use('/api/notifications', notificationsRouter)
+
 // Attendance module routing
 app.use('/api/attendance', attendanceRouter)
 
@@ -94,6 +99,9 @@ app.use('/api/admin', adminRouter)
 
 // Shared agenda for authenticated users; role and data scope are resolved in its service.
 app.use('/api/agenda', agendaRouter)
+
+// Staff class schedules are managed independently from global agendas.
+app.use('/api/class-schedules', classSchedulesRouter)
 
 // Teacher module routing (Apply RBAC directly to Teacher Module Router)
 app.use('/api/teacher', requireAuth, requireRole('teacher'), teacherRouter)

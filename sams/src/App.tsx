@@ -4,6 +4,7 @@ import { NavProvider, usePathname, useRouter } from './lib/nav'
 import { AppShell } from './components/layout/app-shell'
 import { Forbidden, Spinner } from './components/ui-kit'
 import { AdminDashboard } from './components/dashboard/admin-dashboard'
+import { StaffDashboard } from './components/dashboard/staff-dashboard'
 import { ParentDashboard, StudentDashboard, TeacherDashboard } from './components/dashboard/dashboards'
 import LoginPage from './pages/login/login'
 import AgendaPage from './pages/agenda/page'
@@ -13,6 +14,8 @@ import GradesPage from './pages/grades/page'
 import StudentsPage from './pages/students/page'
 import AdminMasterDataPage from './pages/admin/master-data-page'
 import ManageStudentsPage from './pages/admin/manage-students-page'
+import StaffClassesAttendancePage from './pages/staff/classes-attendance-page'
+import StaffClassSchedulesPage from './pages/staff/class-schedules-page'
 import NotFoundPage from './pages/not-found'
 import { ACCESS, canAccess } from './lib/helpers'
 
@@ -84,7 +87,7 @@ export function PublicOnlyRoute({ children }: { children: ReactNode }) {
 function DashboardPage() {
   const { role } = useApp()
   if (role === 'admin') return <AdminDashboard />
-  if (role === 'staff') return <AdminMasterDataPage />
+  if (role === 'staff') return <StaffDashboard />
   if (role === 'parent') return <ParentDashboard />
   if (role === 'teacher') return <TeacherDashboard />
   return <StudentDashboard />
@@ -115,6 +118,14 @@ function AppRoutes() {
   else if (pathname === '/grades') page = <GradesPage />
   else if (pathname === '/students') page = <StudentsPage />
   else if (pathname === '/agenda') page = <AgendaPage />
+  else if (pathname === '/staff/classes-attendance' || pathname.startsWith('/staff/classes-attendance/')) {
+    accessPath = '/staff/classes-attendance'
+    page = <StaffClassesAttendancePage />
+  }
+  else if (pathname === '/staff/class-schedules' || pathname.startsWith('/staff/class-schedules/')) {
+    accessPath = '/staff/class-schedules'
+    page = <StaffClassSchedulesPage />
+  }
   else if (pathname === '/admin/students' || pathname.startsWith('/admin/students/')) {
     accessPath = '/admin/students'
     page = <ManageStudentsPage />

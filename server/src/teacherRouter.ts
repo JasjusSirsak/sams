@@ -42,19 +42,27 @@ teacherRouter.get('/dashboard-summary', requireAuth, async (req: Request, res: R
         classes: [],
         is_homeroom: false,
         homeroom_class_id: null,
+        homeroom_class: null,
         attendance_today: null,
       })
     }
 
     const assignments = await prisma.teaching_assignments.findMany({
       where: { teacher_id: teacher.teacher_id, academic_period_id: period.academic_period_id },
-      select: { class_id: true, classes: { select: { name: true } } },
+      select: {
+        class_id: true,
+        classes: { select: { name: true, grade_level: true } },
+      },
     })
 
     // Distinct classes (a teacher can teach several subjects in one class)
-    const classMap = new Map<string, { class_id: bigint; name: string }>()
+    const classMap = new Map<string, { class_id: bigint; name: string; grade_level: number }>()
     for (const a of assignments) {
-      classMap.set(a.class_id.toString(), { class_id: a.class_id, name: a.classes.name })
+      classMap.set(a.class_id.toString(), {
+        class_id: a.class_id,
+        name: a.classes.name,
+        grade_level: a.classes.grade_level,
+      })
     }
     const classIds = [...classMap.values()].map((c) => c.class_id)
 
@@ -72,8 +80,21 @@ teacherRouter.get('/dashboard-summary', requireAuth, async (req: Request, res: R
     // Homeroom is a fact in data, not a role
     const homeroom = await prisma.homeroom_assignments.findFirst({
       where: { teacher_id: teacher.teacher_id, academic_period_id: period.academic_period_id },
-      select: { class_id: true },
+      select: {
+        class_id: true,
+        classes: { select: { name: true, grade_level: true } },
+      },
     })
+    const homeroomClassId = homeroom?.class_id.toString() ?? null
+    const homeroomStudentCount = homeroom
+      ? countByClass.get(homeroom.class_id.toString()) ??
+        await prisma.student_enrollments.count({
+          where: {
+            class_id: homeroom.class_id,
+            academic_period_id: period.academic_period_id,
+          },
+        })
+      : 0
 
     // Attendance today across the teacher's classes
     let attendanceToday: null | Record<string, number> = null
@@ -110,10 +131,19 @@ teacherRouter.get('/dashboard-summary', requireAuth, async (req: Request, res: R
       classes: [...classMap.values()].map((c) => ({
         class_id: c.class_id.toString(),
         name: c.name,
+        grade_level: c.grade_level,
         student_count: countByClass.get(c.class_id.toString()) ?? 0,
       })),
       is_homeroom: !!homeroom,
-      homeroom_class_id: homeroom ? homeroom.class_id.toString() : null,
+      homeroom_class_id: homeroomClassId,
+      homeroom_class: homeroom
+        ? {
+            class_id: homeroom.class_id.toString(),
+            name: homeroom.classes.name,
+            grade_level: homeroom.classes.grade_level,
+            student_count: homeroomStudentCount,
+          }
+        : null,
       attendance_today: attendanceToday, // null = no session yet today
     })
   } catch (error) {

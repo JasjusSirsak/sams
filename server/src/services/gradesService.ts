@@ -238,6 +238,55 @@ export async function saveGrades(body: Record<string, unknown>, user: SessionUse
   })
 }
 
+export async function deleteGrades(body: Record<string, unknown>, user: SessionUser): Promise<ServiceResult> {
+  const role = user.role.toLowerCase()
+  const assignmentId = parseBigIntSafe(body.teaching_assignment_id)
+  const assessmentName = normalizeOptionalText(body.assessment_name)
+  const rawStudentIds = Array.isArray(body.student_ids) ? body.student_ids : []
+  const studentIds = [...new Set(rawStudentIds
+    .map(parseBigIntSafe)
+    .filter((id): id is bigint => id !== null)
+    .map((id) => id.toString()))]
+    .map((id) => BigInt(id))
+
+  if (!assignmentId || !assessmentName || studentIds.length === 0 || studentIds.length !== rawStudentIds.length) {
+    return result(400, { message: 'A valid teaching assignment, assessment name, and student ID list are required.' })
+  }
+
+  const period = await getActivePeriod()
+  if (!period) return result(400, { message: 'No active academic period.' })
+
+  const teacher = role === 'teacher' ? await getTeacherProfileByUserId(user.userId) : null
+  if (role === 'teacher' && !teacher) {
+    return result(403, { message: 'Forbidden. Teacher profile not found for authenticated account.' })
+  }
+
+  const assignment = await prisma.teaching_assignments.findFirst({
+    where: {
+      teaching_assignment_id: assignmentId,
+      academic_period_id: period.academic_period_id,
+      ...(teacher ? { teacher_id: teacher.teacher_id } : {}),
+    },
+    select: { teaching_assignment_id: true },
+  })
+  if (!assignment) {
+    return result(404, { message: 'Teaching assignment not found for the active academic period.' })
+  }
+
+  const deleted = await prisma.grades.deleteMany({
+    where: {
+      teaching_assignment_id: assignment.teaching_assignment_id,
+      assessment_name: assessmentName,
+      student_id: { in: studentIds },
+    },
+  })
+
+  return result(200, {
+    message: `Successfully deleted ${deleted.count} grade record(s).`,
+    count: deleted.count,
+  })
+}
+
 export async function getGradesByClassAndSubject(
   classIdValue: unknown,
   subjectIdValue: unknown,

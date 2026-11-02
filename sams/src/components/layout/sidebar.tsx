@@ -1,7 +1,7 @@
 'use client'
 
 import { Link, usePathname } from '@/lib/nav'
-import { BookOpenCheck, CalendarDays, ClipboardCheck, GraduationCap, LayoutDashboard, ListChecks, Users, BookOpen, CalendarClock, UserRoundCog } from 'lucide-react'
+import { BookOpenCheck, CalendarDays, ClipboardCheck, GraduationCap, LayoutDashboard, ListChecks, Users, BookOpen, CalendarClock, UserRoundCog, CalendarRange } from 'lucide-react'
 import { useApp } from '@/lib/app-context'
 import { USERS } from '@/lib/data'
 import { canAccess, cn, getInitials } from '@/lib/helpers'
@@ -26,6 +26,18 @@ const NAV = [
       { href: '/admin/academic-periods', label: 'Manage Academic Periods', icon: CalendarClock },
       { href: '/admin/teachers', label: 'Manage Teachers', icon: UserRoundCog },
       { href: '/admin/students', label: 'Manage Students', icon: GraduationCap },
+    ],
+  },
+]
+
+const STAFF_NAV = [
+  { group: 'Overview', items: [{ href: '/', label: 'Dashboard', icon: LayoutDashboard }] },
+  {
+    group: 'Staff',
+    items: [
+      { href: '/staff/classes-attendance', label: 'Classes Attendance', icon: ClipboardCheck },
+      { href: '/staff/class-schedules', label: 'Class Schedules', icon: CalendarRange },
+      { href: '/agenda', label: 'Manage Global Agenda', icon: CalendarDays },
     ],
   },
 ]
@@ -64,7 +76,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       </div>
 
       <nav aria-label="Main" className="flex-1 space-y-5 overflow-y-auto">
-        {NAV.map((section) => {
+        {(role === 'staff' ? STAFF_NAV : NAV).map((section) => {
           const items = section.items.filter((item) => canAccess(role, item.href, isHomeroom))
           if (items.length === 0) return null
           return (
@@ -72,7 +84,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
               <p className="mb-2 px-3 text-xs font-medium uppercase tracking-wider text-sidebar-muted">{section.group}</p>
               <ul className="space-y-1">
                 {items.map(({ href, label, icon: Icon }) => {
-                  const active = pathname === href
+                  const active = pathname === href || (href !== '/' && pathname.startsWith(`${href}/`))
                   return (
                     <li key={href}>
                       <Link

@@ -82,11 +82,7 @@ export function AgendaWidget({ className }: { className?: string }) {
               return {
                 id: item.id,
                 date: dates[index],
-                time: item.startTime
-                  ? item.endTime
-                    ? `${item.startTime} - ${item.endTime}`
-                    : item.startTime
-                  : 'All day',
+                time: item.startTime && item.endTime ? `${item.startTime} - ${item.endTime}` : 'All day',
                 title: item.title,
                 place: item.location ?? '',
                 category: getAgendaCategory(item.label, item.source),

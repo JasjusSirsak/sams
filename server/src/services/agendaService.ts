@@ -139,9 +139,6 @@ async function getAgendaEntriesForRange(
   }
 
   const activeDays = dates.filter((date) => periodByDate.has(formatDate(date)))
-  if (activeDays.length === 0) {
-    return dates.map((date) => ({ date: formatDate(date), items: [] }))
-  }
 
   const allVisibleClassIds = [
     ...new Set([...scopeByPeriod.values()].flat().map((id) => id.toString())),
@@ -201,29 +198,31 @@ async function getAgendaEntriesForRange(
   return dates.map((date) => {
     const dateKey = formatDate(date)
     const period = periodByDate.get(dateKey)
-    if (!period) return { date: dateKey, items: [] }
     const visibleClassIds = new Set(
-      (scopeByPeriod.get(period.academic_period_id.toString()) ?? []).map((id) => id.toString()),
+      (period ? scopeByPeriod.get(period.academic_period_id.toString()) ?? [] : [])
+        .map((id) => id.toString()),
     )
     const entries: AgendaEntry[] = [
       ...agendas
         .filter((agenda) =>
           formatDate(agenda.agenda_date) === dateKey &&
-          (agenda.class_id === null || visibleClassIds.has(agenda.class_id.toString())),
+          (agenda.class_id === null ||
+            (period !== undefined && visibleClassIds.has(agenda.class_id.toString()))),
         )
         .map((agenda) => ({
           id: `agenda-${agenda.agenda_id.toString()}`,
           source: 'agenda' as const,
           title: agenda.title,
-          startTime: null,
-          endTime: null,
-          location: null,
+          startTime: formatTime(agenda.start_time),
+          endTime: formatTime(agenda.end_time),
+          location: agenda.location,
           label: agenda.agenda_type,
           note: agenda.description,
           className: agenda.classes?.name ?? null,
         })),
       ...schedules
         .filter((schedule) =>
+          period !== undefined &&
           schedule.teaching_assignments.academic_period_id === period.academic_period_id &&
           schedule.day_of_week === dayOfWeek(date) &&
           visibleClassIds.has(schedule.teaching_assignments.classes.class_id.toString()),

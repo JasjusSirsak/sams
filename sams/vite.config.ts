@@ -29,4 +29,5 @@ export default defineConfig({
     },
   },
 })
-//on? 
+//on? npx cloudflared tunnel --url http://localhost:5173
+//or npx localtunnel --port 5173

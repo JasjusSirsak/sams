@@ -55,6 +55,47 @@ export async function submitAttendance(payload: SubmitAttendanceParams): Promise
   return response.data
 }
 
+export interface StaffAttendanceExceptionResult {
+  notified_recipients: number
+}
+
+export async function saveStaffAttendanceException(payload: {
+  class_id: string
+  student_id: string
+  date: string
+  status: 'PERMITTED' | 'SICK'
+  note: string
+}): Promise<StaffAttendanceExceptionResult> {
+  const response = await apiClient.post<{ data: StaffAttendanceExceptionResult }>(
+    '/attendance/staff-exception',
+    payload,
+  )
+  return response.data.data
+}
+
+export interface InAppNotification {
+  id: string
+  type: string
+  title: string
+  message: string
+  is_read: boolean
+  created_at: string
+}
+
+export interface InAppNotificationsResponse {
+  data: InAppNotification[]
+  unread_count: number
+}
+
+export async function getInAppNotifications(): Promise<InAppNotificationsResponse> {
+  const response = await apiClient.get<InAppNotificationsResponse>('/notifications')
+  return response.data
+}
+
+export async function markInAppNotificationRead(notificationId: string): Promise<void> {
+  await apiClient.patch(`/notifications/${encodeURIComponent(notificationId)}/read`)
+}
+
 export async function getTodayAttendance(): Promise<TodayAttendanceRecord | null> {
   const response = await apiClient.get<{ data: TodayAttendanceRecord | null }>('/attendance/today')
   return response.data.data
@@ -85,6 +126,15 @@ export async function saveGrades(payload: {
   grades: { student_id: string; score: number }[]
 }) {
   const response = await apiClient.post('/grades', payload)
+  return response.data
+}
+
+export async function deleteGrades(payload: {
+  teaching_assignment_id: string
+  assessment_name: string
+  student_ids: string[]
+}): Promise<{ count: number }> {
+  const response = await apiClient.delete<{ count: number }>('/grades', { data: payload })
   return response.data
 }
 
@@ -120,7 +170,9 @@ export interface ClassSubjectGradesResponse {
 }
 
 export async function getGradesByClassAndSubject(classId: string, subjectId: string): Promise<ClassSubjectGradesResponse> {
-  const response = await apiClient.get<{ data: ClassSubjectGradesResponse }>(`/grades/class/${classId}/subject/${subjectId}`)
+  const response = await apiClient.get<{ data: ClassSubjectGradesResponse }>(
+    `/grades/class/${encodeURIComponent(classId)}/subject/${encodeURIComponent(subjectId)}`,
+  )
   return response.data.data
 }
 
@@ -260,6 +312,129 @@ export async function generateReport(classId: string): Promise<{ file: string }>
   return { file: filename }
 }
 
+export async function exportAttendanceReport(params: {
+  classId: string
+  month: number
+  year: number
+  format: 'xlsx' | 'pdf'
+}): Promise<{ file: string }> {
+  if (!params.classId || !/^[1-9]\d*$/.test(params.classId)) {
+    throw new Error('Choose a valid class.')
+  }
+  if (!Number.isInteger(params.month) || params.month < 1 || params.month > 12) {
+    throw new Error('Choose a valid month.')
+  }
+  if (!Number.isInteger(params.year) || params.year < 2000 || params.year > 2100) {
+    throw new Error('Choose a valid year.')
+  }
+
+  const month = String(params.month).padStart(2, '0')
+  const startDate = `${params.year}-${month}-01`
+  const endDate = new Date(Date.UTC(params.year, params.month, 0)).toISOString().slice(0, 10)
+  const filename = `attendance-report-${params.classId}-${params.year}-${month}.${params.format}`
+  await requestAttendanceExport(
+    { classId: params.classId, startDate, endDate, format: params.format },
+    filename,
+  )
+  return { file: filename }
+}
+
+async function requestAttendanceExport(
+  params: {
+    classId: string
+    startDate: string
+    endDate: string
+    format: 'xlsx' | 'pdf'
+  },
+  filename: string,
+): Promise<void> {
+  let fileBlob: Blob
+  try {
+    const response = await apiClient.get<Blob>('/reports/attendance', {
+      params: {
+        classId: params.classId,
+        startDate: params.startDate,
+        endDate: params.endDate,
+        format: params.format,
+      },
+      responseType: 'blob',
+    })
+    fileBlob = response.data
+  } catch (error: unknown) {
+    const apiError = parseApiError(error)
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'response' in error &&
+      typeof error.response === 'object' &&
+      error.response !== null &&
+      'data' in error.response &&
+      error.response.data instanceof Blob
+    ) {
+      try {
+        const payload: unknown = JSON.parse(await error.response.data.text())
+        if (
+          typeof payload === 'object' &&
+          payload !== null &&
+          'message' in payload &&
+          typeof payload.message === 'string'
+        ) {
+          throw new Error(payload.message, { cause: error })
+        }
+      } catch (parseError: unknown) {
+        if (parseError instanceof Error && parseError.cause === error) throw parseError
+      }
+    }
+    throw new Error(apiError.message, { cause: error })
+  }
+
+  const objectUrl = URL.createObjectURL(fileBlob)
+  const downloadLink = document.createElement('a')
+  downloadLink.href = objectUrl
+  downloadLink.download = filename
+  document.body.appendChild(downloadLink)
+  downloadLink.click()
+  downloadLink.remove()
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000)
+}
+
+export async function exportMonthlyAttendanceReport(params: {
+  classId: string
+  month: number
+  year: number
+  format: 'xlsx' | 'pdf'
+}): Promise<void> {
+  const month = String(params.month).padStart(2, '0')
+  const startDate = `${params.year}-${month}-01`
+  const endDate = new Date(Date.UTC(params.year, params.month, 0)).toISOString().slice(0, 10)
+  await requestAttendanceExport(
+    {
+      classId: params.classId,
+      startDate,
+      endDate,
+      format: params.format,
+    },
+    `attendance-monthly-${params.classId}-${params.year}-${month}.${params.format}`,
+  )
+}
+
+export async function exportWeeklyAttendanceReport(params: {
+  classId: string
+  weekStart: string
+  weekEnd: string
+  format: 'xlsx' | 'pdf'
+}): Promise<void> {
+  await requestAttendanceExport(
+    {
+      classId: params.classId,
+      startDate: params.weekStart,
+      endDate: params.weekEnd,
+      format: params.format,
+    },
+    `attendance-weekly-${params.classId}-${params.weekStart}.${params.format}`,
+  )
+}
+
 export type Student = {
   student_id: string
   nis: string | null
@@ -284,10 +459,17 @@ export type TeacherDashboardSummary = {
   classes: {
     class_id: string
     name: string
+    grade_level: number
     student_count: number
   }[]
   is_homeroom: boolean
   homeroom_class_id: string | null
+  homeroom_class: {
+    class_id: string
+    name: string
+    grade_level: number
+    student_count: number
+  } | null
   attendance_today: {
     present: number
     sick: number
@@ -405,6 +587,46 @@ export async function getSharedAgenda(params: {
   return response.data.data
 }
 
+export type ManagedAgendaType = 'EVENT' | 'HOLIDAY' | 'ACTIVITY' | 'EXAM' | 'MEETING' | 'OTHER'
+
+export interface ManagedAgenda {
+  id: string
+  title: string
+  description: string | null
+  date: string
+  type: ManagedAgendaType
+  start_time: string | null
+  end_time: string | null
+  location: string | null
+}
+
+export interface SaveAgendaInput {
+  title: string
+  description: string
+  date: string
+  type: ManagedAgendaType
+  start_time: string | null
+  end_time: string | null
+  location: string | null
+}
+
+export async function getManagedAgendas(): Promise<ManagedAgenda[]> {
+  const response = await apiClient.get<{ data: ManagedAgenda[] }>('/agenda/manage')
+  return response.data.data
+}
+
+export async function createManagedAgenda(payload: SaveAgendaInput): Promise<void> {
+  await apiClient.post('/agenda/manage', payload)
+}
+
+export async function updateManagedAgenda(id: string, payload: SaveAgendaInput): Promise<void> {
+  await apiClient.put(`/agenda/manage/${encodeURIComponent(id)}`, payload)
+}
+
+export async function deleteManagedAgenda(id: string): Promise<void> {
+  await apiClient.delete(`/agenda/manage/${encodeURIComponent(id)}`)
+}
+
 export interface ParentChild {
   id: string
   student_id: string
@@ -513,6 +735,11 @@ export interface AdminClassCatalogItem {
   academic_year: string
   student_count: number
   room: string | null
+  attendance_today?: {
+    absent: number
+    permitted: number
+    sick: number
+  }
 }
 
 export interface AdminDashboardSummary {
@@ -595,6 +822,75 @@ export async function getAdminClassStudents(classId: string): Promise<AdminClass
     `/admin/classes/${encodeURIComponent(classId)}/students`
   )
   return response.data.data
+}
+
+export interface ClassScheduleEntry {
+  id: string
+  day_of_week: number
+  start_time: string
+  end_time: string
+  room: string | null
+  subject: string
+  subject_code: string
+  teacher: string
+}
+
+export interface ClassScheduleDetail {
+  class: {
+    id: string
+    name: string
+    grade_level: number
+  }
+  period: {
+    id: string
+    academic_year: string
+    semester: number
+  } | null
+  schedules: ClassScheduleEntry[]
+}
+
+export interface ClassScheduleOptions {
+  subjects: Array<{ id: string; code: string; name: string }>
+  teachers: Array<{ id: string; name: string; employee_number: string | null }>
+  period: {
+    id: string
+    academic_year: string
+    semester: number
+  } | null
+}
+
+export interface CreateClassScheduleInput {
+  day_of_week: number
+  start_time: string
+  end_time: string
+  subject_id: string
+  teacher_id: string
+  room: string
+}
+
+export async function getClassScheduleOptions(): Promise<ClassScheduleOptions> {
+  const response = await apiClient.get<{ data: ClassScheduleOptions }>('/class-schedules/options')
+  return response.data.data
+}
+
+export async function getClassSchedule(classId: string): Promise<ClassScheduleDetail> {
+  const response = await apiClient.get<{ data: ClassScheduleDetail }>(
+    `/class-schedules/classes/${encodeURIComponent(classId)}`,
+  )
+  return response.data.data
+}
+
+export async function createClassSchedule(
+  classId: string,
+  payload: CreateClassScheduleInput,
+): Promise<void> {
+  await apiClient.post(`/class-schedules/classes/${encodeURIComponent(classId)}`, payload)
+}
+
+export async function updateClassScheduleRoom(scheduleId: string, room: string): Promise<void> {
+  await apiClient.put(`/class-schedules/${encodeURIComponent(scheduleId)}`, {
+    room: room.trim() || null,
+  })
 }
 
 export async function addAdminClassStudents(

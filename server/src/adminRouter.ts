@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from 'express'
 import prisma from './db'
 import { requireAuth, requireRole } from './auth'
 import studentEnrollmentsRouter from './studentEnrollmentsRouter'
-import { getActivePeriod } from './services/academicPeriod'
+import { getActivePeriod, getJakartaDate } from './services/academicPeriod'
 import { randomBytes } from 'node:crypto'
 import argon2 from 'argon2'
 
@@ -807,7 +807,8 @@ adminRouter.get('/class-catalog', STAFF_UP, async (_req: Request, res: Response)
       const academicPeriodId = cls.homeroom_assignments[0]?.academic_period_id ?? activePeriodId
       return academicPeriodId ? [{ classId: cls.class_id, academicPeriodId }] : []
     })
-    const [enrollmentCounts, roomsByClassPeriod] = classIds.length && periodIds.length
+    const today = getJakartaDate()
+    const [enrollmentCounts, roomsByClassPeriod, todaySessions] = classIds.length && periodIds.length
       ? await Promise.all([
         prisma.student_enrollments.groupBy({
           by: ['class_id', 'academic_period_id'],
@@ -818,8 +819,37 @@ adminRouter.get('/class-catalog', STAFF_UP, async (_req: Request, res: Response)
           _count: { _all: true },
         }),
         getClassRoomsByPeriod(classPeriods),
+        prisma.attendance_sessions.findMany({
+          where: {
+            class_id: { in: classIds },
+            attendance_date: today,
+          },
+          include: {
+            attendance_records: {
+              select: {
+                status: true,
+                approval_status: true,
+              },
+            },
+          },
+        }),
       ])
-      : [[], new Map<string, string>()]
+      : [[], new Map<string, string>(), []]
+
+    const attendanceByClass = new Map<string, { absent: number; permitted: number; sick: number }>()
+    for (const session of todaySessions) {
+      const counts = { absent: 0, permitted: 0, sick: 0 }
+      for (const record of session.attendance_records) {
+        if (record.approval_status === 'REJECTED' || record.status === 'ABSENT') {
+          counts.absent++
+        } else if (record.status === 'PERMITTED') {
+          counts.permitted++
+        } else if (record.status === 'SICK') {
+          counts.sick++
+        }
+      }
+      attendanceByClass.set(session.class_id.toString(), counts)
+    }
 
     const data = classesList.map((cls) => {
       const academicPeriodId = cls.homeroom_assignments[0]?.academic_period_id ?? activePeriodId
@@ -835,6 +865,11 @@ adminRouter.get('/class-catalog', STAFF_UP, async (_req: Request, res: Response)
         room: academicPeriodId
           ? roomsByClassPeriod.get(`${cls.class_id}:${academicPeriodId}`) ?? null
           : null,
+        attendance_today: attendanceByClass.get(cls.class_id.toString()) ?? {
+          absent: 0,
+          permitted: 0,
+          sick: 0,
+        },
       }
     })
 

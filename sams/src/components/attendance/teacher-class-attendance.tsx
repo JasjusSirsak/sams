@@ -12,6 +12,7 @@ import {
 } from '@/lib/api'
 import { ApprovalBadge, Card, EmptyState, PageHeader, Pill, StatusBadge, buttonSecondary, inputClass } from '@/components/ui-kit'
 import { WeeklyChart } from './weekly-chart'
+import { TeacherAttendanceReports } from './teacher-attendance-reports'
 import type { Approval, AttendanceStatus } from '@/lib/data'
 
 function jakartaToday() {
@@ -219,6 +220,11 @@ export function TeacherClassAttendance() {
               weeklyData={attendance?.weekly ?? []}
               classLabel={attendance?.class.name ?? pageTitle}
               isLoading={loading}
+            />
+            <TeacherAttendanceReports
+              classId={classId}
+              date={date}
+              students={attendance?.students ?? []}
             />
             <Card>
               <div className="overflow-x-auto">

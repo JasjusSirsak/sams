@@ -5,4 +5,4 @@ schema.example.backup.prisma
 src/hash.ts
 AGENDA_MANUAL_TESTS.MD
 private_uploads/
-/src/auth.test.ts
+/src/prisma/migrations/

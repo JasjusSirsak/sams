@@ -1,51 +1,39 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { CircleAlert, CircleCheck, RefreshCw, Save } from 'lucide-react'
-import { getGradesByClassAndSubject, getTeacherClasses, saveGrades, type ClassSubjectGradesResponse, type TeacherClassItem } from '@/lib/api'
-import { average, cn, finalScore } from '@/lib/helpers'
-import { Card, Pill, Skeleton, Spinner, buttonPrimary, buttonSecondary, inputClass } from '@/components/ui-kit'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { CircleCheck, CircleAlert, Plus, RefreshCw, Save, X } from 'lucide-react'
+import {
+  deleteGrades,
+  getGradesByClassAndSubject,
+  getTeacherClasses,
+  saveGrades,
+  type ClassSubjectGradesResponse,
+  type TeacherClassItem,
+} from '@/lib/api'
+import { cn } from '@/lib/helpers'
+import { Card, EmptyState, Pill, Spinner, buttonPrimary, buttonSecondary, inputClass } from '@/components/ui-kit'
 
-type Field = 'daily' | 'midterm' | 'final'
-const FIELDS: { key: Field; label: string; assessmentType: string; assessmentName: string }[] = [
-  { key: 'daily', label: 'Daily (40%)', assessmentType: 'DAILY_TASK', assessmentName: 'Daily Average' },
-  { key: 'midterm', label: 'Midterm (30%)', assessmentType: 'MID_EXAM', assessmentName: 'Midterm Exam' },
-  { key: 'final', label: 'Final (30%)', assessmentType: 'FINAL_EXAM', assessmentName: 'Final Exam' },
-]
-
-const isInvalid = (v: number | null) => v != null && (Number.isNaN(v) || v < 0 || v > 100)
-
-type GradeEntryRow = {
-  student_id: string
-  nis: string
-  name: string
-  daily: number | null
-  midterm: number | null
-  final: number | null
+type GradeTab = 'daily' | 'midterm' | 'final'
+type Assessment = { name: string; type: string }
+type PendingGrades = {
+  assignmentId: string
+  assessmentName: string
+  assessmentType: string
+  scores: Record<string, number | null>
 }
 
-function toGradeRows(response: ClassSubjectGradesResponse, assignmentId: string): GradeEntryRow[] {
-  const rows: GradeEntryRow[] = response.enrolled_students.map((student) => ({
-    student_id: student.student_id,
-    nis: student.nis ?? student.student_id,
-    name: student.name ?? 'Unknown Student',
-    daily: null,
-    midterm: null,
-    final: null,
-  }))
-  const rowsByStudent = new Map(rows.map((row) => [row.student_id, row]))
+const TABS: Array<{ id: GradeTab; label: string }> = [
+  { id: 'daily', label: 'Daily' },
+  { id: 'midterm', label: 'Midterm' },
+  { id: 'final', label: 'Final' },
+]
 
-  for (const grade of response.grades) {
-    if (grade.teaching_assignment_id !== assignmentId) continue
+function requestKey(assignmentId: string, revision: number) {
+  return `${assignmentId}:${revision}`
+}
 
-    const field = FIELDS.find(
-      (item) => item.assessmentType === grade.assessment_type.toUpperCase() && item.assessmentName === grade.assessment_name
-    )
-    const row = rowsByStudent.get(grade.student_id)
-    if (field && row) row[field.key] = grade.score
-  }
-
-  return rows
+function getAssessmentKey(assignmentId: string, assessmentName: string) {
+  return `${assignmentId}:${assessmentName}`
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -55,301 +43,605 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return fallback
 }
 
+function getAssessmentType(tab: GradeTab): string {
+  if (tab === 'midterm') return 'MID_EXAM'
+  if (tab === 'final') return 'FINAL_EXAM'
+  return 'DAILY_TASK'
+}
+
+function getAssessmentName(tab: GradeTab, grades: ClassSubjectGradesResponse['grades']): string {
+  const type = getAssessmentType(tab)
+  return grades.find((grade) => grade.assessment_type.toUpperCase() === type)?.assessment_name
+    ?? (tab === 'midterm' ? 'Midterm Exam' : 'Final Exam')
+}
+
+function getDailyAssessments(grades: ClassSubjectGradesResponse['grades']): Assessment[] {
+  const assessmentsByName = new Map<string, Assessment>()
+  for (const grade of grades) {
+    const type = grade.assessment_type.toUpperCase()
+    if (type === 'MID_EXAM' || type === 'FINAL_EXAM') continue
+    if (!assessmentsByName.has(grade.assessment_name)) {
+      assessmentsByName.set(grade.assessment_name, {
+        name: grade.assessment_name,
+        type: grade.assessment_type,
+      })
+    }
+  }
+  return [...assessmentsByName.values()]
+}
+
 export function GradeEntry() {
   const [classes, setClasses] = useState<TeacherClassItem[]>([])
-  const [selectedClass, setSelectedClass] = useState<TeacherClassItem | null>(null)
-  const [period, setPeriod] = useState('s1')
-  const [loadingClasses, setLoadingClasses] = useState(true)
-  const [rows, setRows] = useState<GradeEntryRow[]>([])
+  const [selectedAssignmentId, setSelectedAssignmentId] = useState('')
+  const [classesLoading, setClassesLoading] = useState(true)
+  const [classesError, setClassesError] = useState<string | null>(null)
+  const [classesRevision, setClassesRevision] = useState(0)
   const [gradesRevision, setGradesRevision] = useState(0)
-  const [settledGradeRequestKey, setSettledGradeRequestKey] = useState<string | null>(null)
+  const [loadedGrades, setLoadedGrades] = useState<{
+    key: string
+    data: ClassSubjectGradesResponse
+  } | null>(null)
   const [gradeLoadError, setGradeLoadError] = useState<{ key: string; message: string } | null>(null)
-  const [save, setSave] = useState<'saved' | 'dirty' | 'saving'>('saved')
+  const [activeTab, setActiveTab] = useState<GradeTab>('daily')
+  const [selectedAssessmentName, setSelectedAssessmentName] = useState('')
+  const [draftAssessments, setDraftAssessments] = useState<Record<string, Assessment[]>>({})
+  const [pendingGrades, setPendingGrades] = useState<Record<string, PendingGrades>>({})
+  const [isAddingAssessment, setIsAddingAssessment] = useState(false)
+  const [newAssessmentName, setNewAssessmentName] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
-  const [missingOnly, setMissingOnly] = useState(false)
 
   useEffect(() => {
+    let active = true
     getTeacherClasses()
-      .then((res) => {
-        setClasses(res)
-        if (res.length > 0) {
-          setSelectedClass(res[0])
-        }
+      .then((result) => {
+        if (!active) return
+        setClasses(result)
+        setSelectedAssignmentId((current) =>
+          result.some((item) => item.assignment_id === current)
+            ? current
+            : result[0]?.assignment_id ?? '',
+        )
+        setClassesError(null)
+        setClassesLoading(false)
       })
-      .catch((err) => {
-        setErrorMessage(getErrorMessage(err, 'Failed to load assigned classes.'))
+      .catch((error: unknown) => {
+        if (!active) return
+        setClassesError(getErrorMessage(error, 'Failed to load your teaching assignments.'))
+        setClassesLoading(false)
       })
-      .finally(() => {
-        setLoadingClasses(false)
-      })
-  }, [])
+    return () => {
+      active = false
+    }
+  }, [classesRevision])
+
+  const selectedContext = classes.find((item) => item.assignment_id === selectedAssignmentId) ?? null
+  const activeGradeRequestKey = selectedContext
+    ? requestKey(selectedContext.assignment_id, gradesRevision)
+    : null
 
   useEffect(() => {
-    if (!selectedClass) return
-
-    let isActive = true
-    const requestKey = `${selectedClass.assignment_id}:${gradesRevision}`
-
-    getGradesByClassAndSubject(selectedClass.class_id, selectedClass.subject_id)
-      .then((response) => {
-        if (isActive) {
-          setRows(toGradeRows(response, selectedClass.assignment_id))
-          setGradeLoadError(null)
-          setErrorMessage(null)
-          setSettledGradeRequestKey(requestKey)
-        }
+    if (!selectedContext || !activeGradeRequestKey) return
+    let active = true
+    getGradesByClassAndSubject(selectedContext.class_id, selectedContext.subject_id)
+      .then((result) => {
+        if (!active) return
+        setLoadedGrades({ key: activeGradeRequestKey, data: result })
+        setGradeLoadError(null)
       })
-      .catch((err) => {
-        if (isActive) {
-          setRows([])
-          setGradeLoadError({
-            key: requestKey,
-            message: getErrorMessage(err, 'Failed to load grades for this class and subject.'),
-          })
-          setSettledGradeRequestKey(requestKey)
-        }
+      .catch((error: unknown) => {
+        if (!active) return
+        setGradeLoadError({
+          key: activeGradeRequestKey,
+          message: getErrorMessage(error, 'Failed to load students and grades for this teaching context.'),
+        })
       })
-
     return () => {
-      isActive = false
+      active = false
     }
-  }, [selectedClass, gradesRevision])
+  }, [selectedContext, activeGradeRequestKey])
 
-  const gradeRequestKey = selectedClass ? `${selectedClass.assignment_id}:${gradesRevision}` : null
-  const loadingGrades = gradeRequestKey !== null && settledGradeRequestKey !== gradeRequestKey
-  const loadErrorMessage =
-    gradeRequestKey !== null && gradeLoadError?.key === gradeRequestKey ? gradeLoadError.message : null
-  const visibleErrorMessage = loadErrorMessage || errorMessage
+  const gradeData = loadedGrades?.key === activeGradeRequestKey ? loadedGrades.data : null
+  const currentGradeError = gradeLoadError?.key === activeGradeRequestKey
+    ? gradeLoadError.message
+    : null
+  const isLoadingGrades = Boolean(selectedContext && !gradeData && !currentGradeError)
 
-  const scores = rows.map(finalScore).filter((s): s is number => s != null)
-  const missing = rows.length - scores.length
-  const hasInvalid = rows.some((r) => FIELDS.some((f) => isInvalid(r[f.key])))
-  const visible = missingOnly ? rows.filter((r) => finalScore(r) == null) : rows
+  const periods = useMemo(() => {
+    const map = new Map<string, { key: string; year: string; semester: number }>()
+    for (const item of classes) {
+      const key = `${item.academic_year}:${item.semester}`
+      map.set(key, { key, year: item.academic_year, semester: item.semester })
+    }
+    return [...map.values()]
+  }, [classes])
+  const selectedPeriodKey = selectedContext
+    ? `${selectedContext.academic_year}:${selectedContext.semester}`
+    : ''
+  const contextsInPeriod = classes.filter(
+    (item) => `${item.academic_year}:${item.semester}` === selectedPeriodKey,
+  )
 
-  function update(studentId: string, field: Field, raw: string) {
-    const value = raw === '' ? null : Number(raw)
-    setRows((currentRows) =>
-      currentRows.map((row) =>
-        row.student_id === studentId ? { ...row, [field]: value } : row
-      )
-    )
-    setSave('dirty')
+  const persistedDailyAssessments = getDailyAssessments(gradeData?.grades ?? [])
+  const currentDraftAssessments = selectedContext
+    ? draftAssessments[selectedContext.assignment_id] ?? []
+    : []
+  const dailyAssessments = [...persistedDailyAssessments]
+  for (const assessment of currentDraftAssessments) {
+    if (!dailyAssessments.some((item) => item.name.toLowerCase() === assessment.name.toLowerCase())) {
+      dailyAssessments.push(assessment)
+    }
+  }
+  const selectedDailyAssessment =
+    dailyAssessments.find((assessment) => assessment.name === selectedAssessmentName)
+    ?? dailyAssessments[0]
+    ?? null
+
+  const assessmentName = activeTab === 'daily'
+    ? selectedDailyAssessment?.name ?? ''
+    : getAssessmentName(activeTab, gradeData?.grades ?? [])
+  const assessmentType = activeTab === 'daily'
+    ? selectedDailyAssessment?.type ?? 'DAILY_TASK'
+    : getAssessmentType(activeTab)
+  const pendingKey = selectedContext && assessmentName
+    ? getAssessmentKey(selectedContext.assignment_id, assessmentName)
+    : ''
+  const activePending = pendingKey ? pendingGrades[pendingKey] : undefined
+  const savedGradesForAssessment = gradeData?.grades.filter(
+    (grade) => grade.assessment_name === assessmentName,
+  ) ?? []
+  const savedScoreByStudent = new Map(
+    savedGradesForAssessment.map((grade) => [grade.student_id, grade.score]),
+  )
+
+  function getScore(studentId: string): number | null {
+    if (activePending && Object.prototype.hasOwnProperty.call(activePending.scores, studentId)) {
+      return activePending.scores[studentId]
+    }
+    return savedScoreByStudent.get(studentId) ?? null
+  }
+
+  const students = gradeData?.enrolled_students ?? []
+  const enteredScores = students
+    .map((student) => getScore(student.student_id))
+    .filter((score): score is number => score !== null)
+  const missingCount = students.length - enteredScores.length
+  const average = enteredScores.length
+    ? Math.round(enteredScores.reduce((total, score) => total + score, 0) / enteredScores.length)
+    : null
+  const hasUnsavedChanges = Object.values(pendingGrades).some(
+    (pending) => pending.assignmentId === selectedContext?.assignment_id,
+  )
+  const hasInvalidScores = Object.values(pendingGrades)
+    .filter((pending) => pending.assignmentId === selectedContext?.assignment_id)
+    .some((pending) => Object.values(pending.scores).some(
+      (score) => score !== null && (!Number.isFinite(score) || score < 0 || score > 100),
+    ))
+
+  function updateScore(studentId: string, rawValue: string) {
+    if (!selectedContext || !assessmentName) return
+    const value = rawValue === '' ? null : Number(rawValue)
+    const key = getAssessmentKey(selectedContext.assignment_id, assessmentName)
+    const savedValue = savedScoreByStudent.get(studentId) ?? null
+    setPendingGrades((current) => {
+      const previous = current[key]
+      if (value === savedValue) {
+        if (!previous || !Object.prototype.hasOwnProperty.call(previous.scores, studentId)) {
+          return current
+        }
+        const scores = { ...previous.scores }
+        delete scores[studentId]
+        if (Object.keys(scores).length === 0) {
+          const next = { ...current }
+          delete next[key]
+          return next
+        }
+        return { ...current, [key]: { ...previous, scores } }
+      }
+      return {
+        ...current,
+        [key]: {
+          assignmentId: selectedContext.assignment_id,
+          assessmentName,
+          assessmentType,
+          scores: {
+            ...previous?.scores,
+            [studentId]: value,
+          },
+        },
+      }
+    })
+    setErrorMessage(null)
+  }
+
+  function addAssessment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!selectedContext) return
+    const name = newAssessmentName.trim()
+    if (!name) {
+      setErrorMessage('Enter an assessment name.')
+      return
+    }
+    if (dailyAssessments.some((assessment) => assessment.name.toLowerCase() === name.toLowerCase())) {
+      setErrorMessage('An assessment with this name already exists.')
+      return
+    }
+
+    setDraftAssessments((current) => ({
+      ...current,
+      [selectedContext.assignment_id]: [
+        ...(current[selectedContext.assignment_id] ?? []),
+        { name, type: 'DAILY_TASK' },
+      ],
+    }))
+    setSelectedAssessmentName(name)
+    setNewAssessmentName('')
+    setIsAddingAssessment(false)
+    setErrorMessage(null)
+  }
+
+  function handleContextChange(assignmentId: string) {
+    setSelectedAssignmentId(assignmentId)
+    setSelectedAssessmentName('')
     setErrorMessage(null)
   }
 
   async function handleSave() {
-    if (!selectedClass) return
-
-    setSave('saving')
+    if (!selectedContext || !gradeData || !hasUnsavedChanges || hasInvalidScores) return
+    const changes = Object.values(pendingGrades).filter(
+      (pending) => pending.assignmentId === selectedContext.assignment_id,
+    )
+    setIsSaving(true)
     setErrorMessage(null)
-    let savedAnyGrades = false
-    try {
-      for (const field of FIELDS) {
-        const validGrades = rows
-          .filter((r) => r[field.key] != null)
-          .map((r) => ({
-            student_id: r.student_id,
-            score: r[field.key]!,
-          }))
+    let didPersist = false
 
-        if (validGrades.length > 0) {
+    try {
+      for (const change of changes) {
+        const scoreEntries = Object.entries(change.scores)
+        const valuesToSave = scoreEntries
+          .filter((entry): entry is [string, number] => entry[1] !== null)
+          .map(([student_id, score]) => ({ student_id, score }))
+        const savedIds = new Set(
+          gradeData.grades
+            .filter((grade) => grade.assessment_name === change.assessmentName)
+            .map((grade) => grade.student_id),
+        )
+        const studentIdsToDelete = scoreEntries
+          .filter(([studentId, score]) => score === null && savedIds.has(studentId))
+          .map(([studentId]) => studentId)
+
+        if (valuesToSave.length) {
           await saveGrades({
-            teaching_assignment_id: selectedClass.assignment_id,
-            assessment_type: field.assessmentType,
-            assessment_name: field.assessmentName,
-            grades: validGrades,
+            teaching_assignment_id: change.assignmentId,
+            assessment_type: change.assessmentType,
+            assessment_name: change.assessmentName,
+            grades: valuesToSave,
           })
-          savedAnyGrades = true
+          didPersist = true
+        }
+        if (studentIdsToDelete.length) {
+          await deleteGrades({
+            teaching_assignment_id: change.assignmentId,
+            assessment_name: change.assessmentName,
+            student_ids: studentIdsToDelete,
+          })
+          didPersist = true
         }
       }
-      setSave('saved')
+
+      if (!didPersist) {
+        throw new Error('Enter at least one score before saving a new assessment.')
+      }
+      setPendingGrades((current) => Object.fromEntries(
+        Object.entries(current).filter(([, pending]) => pending.assignmentId !== selectedContext.assignment_id),
+      ))
       setGradesRevision((revision) => revision + 1)
-    } catch (err: unknown) {
-      setErrorMessage(getErrorMessage(err, 'Failed to save grades. Please check permissions.'))
-      setSave('dirty')
-      if (savedAnyGrades) setGradesRevision((revision) => revision + 1)
+    } catch (error: unknown) {
+      setErrorMessage(getErrorMessage(error, 'Failed to save grades. Please try again.'))
+      if (didPersist) setGradesRevision((revision) => revision + 1)
+    } finally {
+      setIsSaving(false)
     }
   }
 
   return (
     <div className="space-y-6">
       <Card>
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <label htmlFor="class" className="mb-1.5 block text-sm font-medium text-ink">
-              Class
+            <label htmlFor="teaching-context" className="mb-1.5 block text-sm font-medium text-ink">
+              Select Teaching Context
             </label>
-            {loadingClasses ? (
-              <Skeleton className="h-10 w-full rounded-lg" />
-            ) : (
-              <select
-                id="class"
-                value={selectedClass?.assignment_id || ''}
-                disabled={save === 'dirty' || save === 'saving'}
-                onChange={(e) => {
-                  const found = classes.find((c) => c.assignment_id === e.target.value)
-                  if (found) setSelectedClass(found)
-                }}
-                className={inputClass}
-              >
-                {classes.length === 0 ? (
-                  <option value="">No assigned classes</option>
-                ) : (
-                  classes.map((c) => (
-                    <option key={c.assignment_id} value={c.assignment_id}>
-                      {c.name} — {c.subject}
-                    </option>
-                  ))
-                )}
-              </select>
-            )}
-          </div>
-          <div>
-            <label htmlFor="subject" className="mb-1.5 block text-sm font-medium text-ink">
-              Subject
-            </label>
-            <select id="subject" className={inputClass} disabled value={selectedClass?.subject || 'Mathematics'}>
-              <option value={selectedClass?.subject || 'Mathematics'}>
-                {selectedClass?.subject || 'Mathematics'}
-              </option>
+            <select
+              id="teaching-context"
+              value={selectedAssignmentId}
+              onChange={(event) => handleContextChange(event.target.value)}
+              className={inputClass}
+              disabled={classesLoading || !classes.length || isSaving || hasUnsavedChanges}
+            >
+              {contextsInPeriod.length ? contextsInPeriod.map((context) => (
+                <option key={context.assignment_id} value={context.assignment_id}>
+                  {context.subject} - {context.name}
+                </option>
+              )) : (
+                <option value="">No teaching contexts available</option>
+              )}
             </select>
           </div>
           <div>
-            <label htmlFor="period" className="mb-1.5 block text-sm font-medium text-ink">
+            <label htmlFor="academic-period" className="mb-1.5 block text-sm font-medium text-ink">
               Academic period
             </label>
-            <select id="period" value={period} onChange={(e) => setPeriod(e.target.value)} className={inputClass}>
-              <option value="s1">Semester 1 · 2026/2027</option>
-              <option value="s2">Semester 2 · 2026/2027</option>
+            <select
+              id="academic-period"
+              value={selectedPeriodKey}
+              onChange={(event) => {
+                const nextContext = classes.find(
+                  (item) => `${item.academic_year}:${item.semester}` === event.target.value,
+                )
+                if (nextContext) handleContextChange(nextContext.assignment_id)
+              }}
+              className={inputClass}
+              disabled={classesLoading || periods.length <= 1 || isSaving || hasUnsavedChanges}
+            >
+              {periods.length ? periods.map((period) => (
+                <option key={period.key} value={period.key}>
+                  {period.year} · Semester {period.semester}
+                </option>
+              )) : <option value="">No active academic period</option>}
             </select>
           </div>
         </div>
       </Card>
 
-      {visibleErrorMessage && (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-center">
-          <p className="flex items-center justify-center gap-2 text-sm text-red-600 font-medium">
-            <CircleAlert className="size-4" /> {visibleErrorMessage}
-            {selectedClass && !loadingGrades && (
-              <button
-                type="button"
-                onClick={() => setGradesRevision((revision) => revision + 1)}
-                className={`${buttonSecondary} py-1.5`}
-              >
-                <RefreshCw className="size-4" aria-hidden="true" /> Retry
-              </button>
-            )}
+      {classesError && (
+        <div role="alert" className="rounded-xl border border-danger/20 bg-danger/5 p-4">
+          <p className="flex items-center gap-2 text-sm font-medium text-danger">
+            <CircleAlert className="size-4" aria-hidden="true" />
+            {classesError}
           </p>
+          <button
+            type="button"
+            onClick={() => {
+              setClassesLoading(true)
+              setClassesError(null)
+              setClassesRevision((revision) => revision + 1)
+            }}
+            className={`${buttonSecondary} mt-3 py-1.5`}
+          >
+            <RefreshCw className="size-4" aria-hidden="true" /> Try again
+          </button>
         </div>
       )}
 
-      <Card>
-        <div className="mb-4 flex flex-wrap items-center gap-3">
-          <Pill className="bg-primary-soft text-primary">Class average {average(scores)}</Pill>
-          {missing > 0 ? (
-            <Pill className="bg-warning/15 text-warning">{missing} missing</Pill>
-          ) : (
-            <Pill className="bg-success/15 text-success">Complete</Pill>
-          )}
-          <label className="flex items-center gap-2 text-sm text-ink">
-            <input type="checkbox" checked={missingOnly} onChange={(e) => setMissingOnly(e.target.checked)} className="size-4 accent-[var(--primary)]" />
-            Show missing only
-          </label>
+      <Card className="p-0">
+        <div className="flex flex-col gap-4 border-b border-line px-5 pt-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex gap-1" role="tablist" aria-label="Assessment type">
+            {TABS.map((tab) => (
+              <button
+                key={tab.id}
+                id={`grade-tab-${tab.id}`}
+                type="button"
+                role="tab"
+                aria-selected={activeTab === tab.id}
+                aria-controls="grade-panel"
+                onClick={() => setActiveTab(tab.id)}
+                className={cn(
+                  'border-b-2 px-4 py-2.5 text-sm font-semibold transition-colors',
+                  activeTab === tab.id
+                    ? 'border-primary text-primary'
+                    : 'border-transparent text-muted hover:text-ink',
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
 
-          <div className="ml-auto flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3 pb-3 sm:pb-2">
+            <Pill className="bg-primary-soft text-primary">Average {average ?? '—'}</Pill>
+            {missingCount > 0 ? (
+              <Pill className="bg-warning/15 text-warning">{missingCount} missing</Pill>
+            ) : students.length ? (
+              <Pill className="bg-success/15 text-success">Complete</Pill>
+            ) : null}
             <span className="flex items-center gap-1.5 text-sm text-muted" aria-live="polite">
-              {save === 'saved' && (
+              {hasUnsavedChanges ? 'Unsaved changes' : (
                 <>
                   <CircleCheck className="size-4 text-success" aria-hidden="true" /> All changes saved
                 </>
               )}
-              {save === 'dirty' && 'Unsaved changes'}
-              {save === 'saving' && 'Saving...'}
             </span>
             <button
               type="button"
-              onClick={() => setGradesRevision((revision) => revision + 1)}
-              disabled={!selectedClass || loadingGrades || save !== 'saved'}
-              className={`${buttonSecondary} py-1.5`}
+              onClick={handleSave}
+              disabled={!hasUnsavedChanges || isSaving || hasInvalidScores || !gradeData}
+              className={`${buttonPrimary} py-1.5`}
             >
-              <RefreshCw className="size-4" aria-hidden="true" /> Refresh
-            </button>
-            <button type="button" onClick={handleSave} disabled={save !== 'dirty' || hasInvalid} className={buttonPrimary}>
-              {save === 'saving' ? <Spinner /> : <Save className="size-4" aria-hidden="true" />}
+              {isSaving ? <Spinner /> : <Save className="size-4" aria-hidden="true" />}
               Save
             </button>
+            {hasUnsavedChanges && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (!selectedContext) return
+                  setPendingGrades((current) => Object.fromEntries(
+                    Object.entries(current).filter(([, pending]) => pending.assignmentId !== selectedContext.assignment_id),
+                  ))
+                  setErrorMessage(null)
+                }}
+                disabled={isSaving}
+                className={`${buttonSecondary} py-1.5`}
+              >
+                Discard
+              </button>
+            )}
           </div>
         </div>
 
-        {hasInvalid && (
-          <p role="alert" className="mb-4 flex items-center gap-2 text-sm text-danger">
-            <CircleAlert className="size-4" aria-hidden="true" /> Scores must be between 0 and 100.
-          </p>
-        )}
+        <div id="grade-panel" role="tabpanel" aria-labelledby={`grade-tab-${activeTab}`} className="p-5">
+          {(errorMessage || currentGradeError) && (
+            <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-danger/20 bg-danger/5 px-3 py-2">
+              <p className="flex items-center gap-2 text-sm text-danger">
+                <CircleAlert className="size-4 shrink-0" aria-hidden="true" />
+                {errorMessage || currentGradeError}
+              </p>
+              {currentGradeError && (
+                <button
+                  type="button"
+                  onClick={() => setGradesRevision((revision) => revision + 1)}
+                  className={`${buttonSecondary} py-1.5`}
+                >
+                  <RefreshCw className="size-4" aria-hidden="true" /> Retry
+                </button>
+              )}
+              {hasInvalidScores && (
+                <p role="alert" className="mb-4 flex items-center gap-2 text-sm text-danger">
+                  <CircleAlert className="size-4" aria-hidden="true" />
+                  Scores must be between 0 and 100.
+                </p>
+              )}
+            </div>
+          )}
 
-        {period === 's2' ? (
-          <p className="rounded-xl bg-surface-muted p-6 text-center text-sm text-muted">Semester 2 grade entry opens in January 2027.</p>
-        ) : loadingClasses || loadingGrades ? (
-          <div role="status" className="flex items-center justify-center gap-2 rounded-xl bg-surface-muted p-6 text-sm text-muted">
-            <Spinner /> Loading grades...
-          </div>
-        ) : !selectedClass ? (
-          <p className="rounded-xl bg-surface-muted p-6 text-center text-sm text-muted">No assigned classes available.</p>
-        ) : rows.length === 0 ? (
-          <p className="rounded-xl bg-surface-muted p-6 text-center text-sm text-muted">No enrolled students found for this class.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-sm">
-              <thead>
-                <tr className="border-b border-line text-left text-xs uppercase tracking-wider text-muted">
-                  <th className="py-3 font-medium">NIS</th>
-                  <th className="py-3 font-medium">Student</th>
-                  {FIELDS.map((f) => (
-                    <th key={f.key} className="py-3 text-center font-medium">
-                      {f.label}
+          {activeTab === 'daily' && (
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end">
+              <div className="flex-1 sm:max-w-sm">
+                <label htmlFor="assessment-name" className="mb-1.5 block text-sm font-medium text-ink">
+                  Assessment Name
+                </label>
+                <select
+                  id="assessment-name"
+                  value={selectedDailyAssessment?.name ?? ''}
+                  onChange={(event) => setSelectedAssessmentName(event.target.value)}
+                  className={inputClass}
+                  disabled={!dailyAssessments.length || isSaving}
+                >
+                  {dailyAssessments.length ? dailyAssessments.map((assessment) => (
+                    <option key={assessment.name} value={assessment.name}>{assessment.name}</option>
+                  )) : <option value="">No assessments yet</option>}
+                </select>
+              </div>
+              {!isAddingAssessment ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsAddingAssessment(true)
+                    setErrorMessage(null)
+                  }}
+                  className={`${buttonSecondary} py-2`}
+                  disabled={!selectedContext || isSaving || hasUnsavedChanges}
+                >
+                  <Plus className="size-4" aria-hidden="true" />
+                  New Assessment
+                </button>
+              ) : (
+                <form onSubmit={addAssessment} className="flex flex-col gap-2 sm:flex-row">
+                  <label htmlFor="new-assessment-name" className="sr-only">Assessment name</label>
+                  <input
+                    id="new-assessment-name"
+                    autoFocus
+                    value={newAssessmentName}
+                    onChange={(event) => setNewAssessmentName(event.target.value)}
+                    placeholder="Assessment name"
+                    maxLength={100}
+                    className={inputClass}
+                  />
+                  <button type="submit" className={`${buttonPrimary} py-2`}>
+                    <Plus className="size-4" aria-hidden="true" />
+                    Add
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsAddingAssessment(false)
+                      setNewAssessmentName('')
+                      setErrorMessage(null)
+                    }}
+                    className={`${buttonSecondary} py-2`}
+                    aria-label="Cancel adding assessment"
+                  >
+                    <X className="size-4" aria-hidden="true" />
+                  </button>
+                </form>
+              )}
+            </div>
+          )}
+
+          {classesLoading ? (
+            <div role="status" className="flex items-center justify-center gap-2 rounded-xl bg-surface-muted p-8 text-sm text-muted">
+              <Spinner /> Loading teaching assignments...
+            </div>
+          ) : classesError ? (
+            <EmptyState title="Unable to load classes" text="Retry the request to load your teaching assignments." />
+          ) : !selectedContext ? (
+            <EmptyState
+              title="No teaching contexts"
+              text="You have no teaching assignments in the active academic period."
+            />
+          ) : isLoadingGrades ? (
+            <div role="status" className="flex items-center justify-center gap-2 rounded-xl bg-surface-muted p-8 text-sm text-muted">
+              <Spinner /> Loading students and grades...
+            </div>
+          ) : currentGradeError ? (
+            <EmptyState title="Unable to load class grades" text="Retry the request to load the class roster and grades." />
+          ) : !gradeData?.enrolled_students.length ? (
+            <EmptyState title="No students enrolled" text="There are no enrolled students for this teaching context." />
+          ) : activeTab === 'daily' && !selectedDailyAssessment ? (
+            <EmptyState title="No assessments yet" text="Add an assessment and enter at least one score to save it." />
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[560px] text-sm">
+                <thead>
+                  <tr className="border-b border-line text-left text-xs uppercase tracking-wider text-muted">
+                    <th className="py-3 font-medium">NIS</th>
+                    <th className="py-3 font-medium">Student</th>
+                    <th className="py-3 text-center font-medium">
+                      {activeTab === 'daily'
+                        ? selectedDailyAssessment?.name
+                        : TABS.find((tab) => tab.id === activeTab)?.label}
                     </th>
-                  ))}
-                  <th className="py-3 text-right font-medium">Final score</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line">
-                {visible.map((r) => {
-                  const score = finalScore(r)
-                  return (
-                    <tr key={r.student_id} className={cn(score == null && 'bg-warning/5')}>
-                      <td className="py-2.5 text-muted">{r.nis}</td>
-                      <td className="py-2.5 font-medium text-ink">{r.name}</td>
-                      {FIELDS.map((f) => (
-                        <td key={f.key} className="px-1 py-2.5 text-center">
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-line">
+                  {gradeData.enrolled_students.map((student) => {
+                    const score = getScore(student.student_id)
+                    const invalid = score !== null && (!Number.isFinite(score) || score < 0 || score > 100)
+                    return (
+                      <tr key={student.student_id} className={cn(score === null && 'bg-warning/5')}>
+                        <td className="py-2.5 text-muted">{student.nis ?? '—'}</td>
+                        <td className="py-2.5 font-medium text-ink">{student.name ?? 'Unknown Student'}</td>
+                        <td className="px-1 py-2.5 text-center">
                           <input
                             type="number"
                             min={0}
                             max={100}
                             inputMode="numeric"
-                            aria-label={`${f.label} for ${r.name}`}
-                            value={r[f.key] ?? ''}
-                            onChange={(e) => update(r.student_id, f.key, e.target.value)}
+                            aria-label={`${assessmentName || activeTab} score for ${student.name ?? 'student'}`}
+                            value={score ?? ''}
+                            onChange={(event) => updateScore(student.student_id, event.target.value)}
                             placeholder="—"
                             className={cn(
                               inputClass,
-                              'mx-auto w-20 text-center',
-                              r[f.key] == null && 'border-warning/60',
-                              isInvalid(r[f.key]) && 'border-danger text-danger',
+                              'mx-auto w-24 text-center',
+                              score === null && 'border-warning/60',
+                              invalid && 'border-danger text-danger',
                             )}
                           />
                         </td>
-                      ))}
-                      <td className="py-2.5 text-right font-semibold">
-                        {score == null ? <span className="text-warning">Missing</span> : <span className="text-ink">{score}</span>}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-        <p className="mt-4 text-xs text-muted">Final score = Daily × 40% + Midterm × 30% + Final × 30%</p>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <p className="mt-4 text-xs text-muted">
+            Grades are saved to the active academic period. A new assessment is recorded after its first score is saved.
+          </p>
+        </div>
       </Card>
     </div>
   )

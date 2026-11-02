@@ -232,7 +232,7 @@ authRouter.post('/refresh', requireSameOrigin, async (req: Request, res: Respons
   }
 
   try {
-    const session = await prisma.refresh_sessions.findUnique({
+    const session = await prisma.refresh_sessions.findFirst({
       where: { token_hash: hashRefreshToken(rawToken) },
       include: {
         users: {
@@ -424,7 +424,7 @@ authRouter.post('/logout', requireSameOrigin, async (req: Request, res: Response
   try {
     const rawToken: unknown = req.cookies?.[REFRESH_COOKIE_NAME]
     if (typeof rawToken === 'string' && isValidRefreshToken(rawToken)) {
-      const session = await prisma.refresh_sessions.findUnique({
+      const session = await prisma.refresh_sessions.findFirst({
         where: { token_hash: hashRefreshToken(rawToken) },
       })
       if (session) {

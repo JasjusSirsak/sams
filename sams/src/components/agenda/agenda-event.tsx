@@ -19,9 +19,11 @@ export function AgendaEvent({ event }: { event: AgendaItem & { displayLabel?: st
           <span className="flex items-center gap-1">
             <Clock className="size-3.5" aria-hidden="true" /> {event.time}
           </span>
-          <span className="flex items-center gap-1">
-            <MapPin className="size-3.5" aria-hidden="true" /> {event.place}
-          </span>
+          {event.place && (
+            <span className="flex items-center gap-1">
+              <MapPin className="size-3.5" aria-hidden="true" /> {event.place}
+            </span>
+          )}
         </p>
       </div>
       <Pill className="h-fit bg-surface-muted text-muted">{event.displayLabel ?? event.category}</Pill>
